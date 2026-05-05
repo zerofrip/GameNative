@@ -83,7 +83,9 @@ jobs:
         if [ ! -x "$SDKMANAGER" ]; then
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
         fi
-        yes | "$SDKMANAGER" --install "build-tools;34.0.0"
+        if ! "$SDKMANAGER" --install "build-tools;34.0.0"; then
+          yes | "$SDKMANAGER" --install "build-tools;34.0.0"
+        fi
 
     - name: Build with Gradle
       run: ./gradlew :app:bundleRelease
