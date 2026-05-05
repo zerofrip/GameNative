@@ -20,6 +20,7 @@
         <item>Vortek (Universal)</item>
         <item>Turnip (Adreno)</item>
         <item>VirGL (Universal)</item>
+        <item>PanVK (Mali / manifest)</item>
         <item>Adreno (Adreno)</item>
         <item>SD 8 Elite (SD 8 Elite)</item>
     </string-array>

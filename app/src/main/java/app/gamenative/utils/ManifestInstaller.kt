@@ -7,6 +7,7 @@ import app.gamenative.service.SteamService
 import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
+import com.winlator.contents.PanVkDriverManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -30,7 +31,12 @@ object ManifestInstaller {
             destFile = File(context.cacheDir, entry.url.substringAfterLast("/"))
             SteamService.fetchFile(entry.url, destFile, onProgress)
             val uri = Uri.fromFile(destFile)
-            val name = AdrenotoolsManager(context).installDriver(uri)
+            val stack = entry.driverStack?.lowercase()
+            val name = if (stack == "panvk") {
+                PanVkDriverManager(context).installDriver(uri)
+            } else {
+                AdrenotoolsManager(context).installDriver(uri)
+            }
             if (name.isEmpty()) {
                 return@withContext ManifestInstallResult(
                     success = false,

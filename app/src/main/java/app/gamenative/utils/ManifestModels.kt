@@ -9,6 +9,11 @@ data class ManifestEntry(
     val url: String,
     val variant: String? = null,
     val arch: String? = null,
+    /**
+     * When [ManifestContentTypes.DRIVER]: `adrenotools` (default) uses [com.winlator.contents.AdrenotoolsManager];
+     * `panvk` uses [com.winlator.contents.PanVkDriverManager] (VK_ICD + LD_LIBRARY_PATH, not ADRENOTOOLS_*).
+     */
+    val driverStack: String? = null,
 )
 
 @Serializable

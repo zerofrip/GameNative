@@ -1,0 +1,7 @@
+{
+  "game_id": "example",
+  "renderer": "zink",
+  "resolution": "900p",
+  "fsr": true,
+  "require_custom_mesa": false
+}

@@ -66,6 +66,8 @@ import app.gamenative.R
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.ui.util.applyScreenEffectsConfig
 import app.gamenative.ui.util.loadScreenEffectsConfig
+import app.gamenative.rendering.GameLaunchConfig
+import app.gamenative.rendering.RendererManager
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -115,6 +117,7 @@ import com.winlator.container.ContainerManager
 import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
+import com.winlator.contents.PanVkDriverManager
 import com.winlator.core.AppUtils
 import com.winlator.core.Callback
 import com.winlator.core.DXVKHelper
@@ -329,6 +332,12 @@ fun XServerScreen(
 
     val container = remember(appId) {
         ContainerUtils.getContainer(context, appId)
+    }
+
+    val gameLaunchConfig = remember(appId) { GameLaunchConfig.load(context, appId) }
+    remember(appId) {
+        RendererManager.applyPerGameHints(container, gameLaunchConfig)
+        null
     }
 
     val suspendPolicy = remember(container.id) { container.suspendPolicy }
@@ -1906,6 +1915,13 @@ fun XServerScreen(
                                 envVars,
                                 firstTimeBoot,
                                 vkbasaltConfig,
+                            )
+                            RendererManager.applyToLaunchEnv(
+                                context,
+                                imageFs,
+                                envVars,
+                                container,
+                                gameLaunchConfig,
                             )
                             changeWineAudioDriver(xServerState.value.audioDriver, container, ImageFs.find(context))
                             setImagefsContainerVariant(context, container)
@@ -4598,6 +4614,9 @@ private fun extractGraphicsDriverFiles(
             cacheId += "-" + DefaultVersion.VIRGL
         } else if (graphicsDriver == "vortek" || graphicsDriver == "adreno" || graphicsDriver == "sd-8-elite") {
             cacheId += "-" + DefaultVersion.VORTEK
+        } else if (graphicsDriver == "panvk") {
+            val pv = container.graphicsDriverVersion.takeIf { it.isNotEmpty() } ?: ""
+            cacheId += "-panvk-" + (pv.ifEmpty { "default" })
         }
 
         val imageFs = ImageFs.find(context)
@@ -4729,6 +4748,21 @@ private fun extractGraphicsDriverFiles(
             if (changed) {
                 TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "graphics_driver/vortek-2.1.tzst", rootDir)
                 TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "graphics_driver/zink-22.2.5.tzst", rootDir)
+            }
+        } else if (graphicsDriver == "panvk") {
+            val pvMgr = PanVkDriverManager(context)
+            val ver = container.graphicsDriverVersion
+            if (ver.isNotEmpty() && pvMgr.enumerateInstalledDrivers().contains(ver)) {
+                pvMgr.applyManifestDriver(envVars, imageFs, ver)
+            } else {
+                val cm = ContentsManager(context)
+                val profiles = cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_PANVK)
+                val prof = profiles?.firstOrNull { it.verName == ver } ?: profiles?.firstOrNull()
+                if (prof != null) {
+                    pvMgr.applyContentProfile(context, envVars, imageFs, prof)
+                } else if (ver.isNotEmpty()) {
+                    pvMgr.applyManifestDriver(envVars, imageFs, ver)
+                }
             }
         }
     } else {

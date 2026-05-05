@@ -195,7 +195,7 @@ object ManifestComponentHelper {
             graphicsDrivers.getOrNull(graphicsDriverIndex).orEmpty(),
         )
         val isVortekLike = containerVariant.equals("glibc", ignoreCase = true) &&
-            driverType in listOf("vortek", "adreno", "sd-8-elite")
+            driverType in listOf("vortek", "adreno", "sd-8-elite", "panvk")
 
         val isVKD3D = StringUtils.parseIdentifier(
             dxWrappers.getOrNull(dxWrapperIndex).orEmpty(),

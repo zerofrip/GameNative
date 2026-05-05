@@ -93,6 +93,7 @@ import app.gamenative.service.SteamService
 import app.gamenative.utils.ManifestComponentHelper.VersionOptionList
 import app.gamenative.utils.ManifestRepository
 import com.winlator.contents.ContentProfile
+import com.winlator.contents.PanVkDriverManager
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
 import com.alorma.compose.settings.ui.SettingsSwitch
@@ -228,6 +229,7 @@ fun ContainerConfigDialog(
         var manifestDownloadProgress by remember { mutableStateOf(-1f) }
         var manifestDownloadLabel by remember { mutableStateOf("") }
         var versionsLoaded by remember { mutableStateOf(false) }
+        var panvkVersions by remember { mutableStateOf<List<String>>(emptyList()) }
         val showCustomResolutionDialogRef = remember { mutableStateOf(false) }
         var showCustomResolutionDialog by showCustomResolutionDialogRef
         val customResolutionValidationErrorRef = remember { mutableStateOf<String?>(null) }
@@ -237,6 +239,7 @@ fun ContainerConfigDialog(
             if (visible) {
                 showCustomResolutionDialog = false
                 customResolutionValidationError = null
+                panvkVersions = PanVkDriverManager(context).enumerateInstalledDrivers().toList()
             }
         }
 
@@ -670,6 +673,9 @@ fun ContainerConfigDialog(
                 "vortek" -> vortekVersions
                 "adreno" -> adrenoVersions
                 "sd-8-elite" -> sd8EliteVersions
+                "panvk" -> panvkVersions.ifEmpty {
+                    listOf("(Install PanVK zip — Driver manager)")
+                }
                 else -> zinkVersions
             }
         }
@@ -705,7 +711,8 @@ fun ContainerConfigDialog(
         // VKD3D version control (forced depending on driver)
         fun vkd3dForcedVersion(): String {
             val driverType = StringUtils.parseIdentifier(graphicsDrivers[graphicsDriverIndex])
-            val isVortekLike = config.containerVariant.equals(Container.GLIBC) && driverType == "vortek" || driverType == "adreno" || driverType == "sd-8-elite"
+            val isVortekLike = config.containerVariant.equals(Container.GLIBC) &&
+                (driverType == "vortek" || driverType == "adreno" || driverType == "sd-8-elite" || driverType == "panvk")
             return if (isVortekLike) "2.6" else "2.14.1"
         }
 

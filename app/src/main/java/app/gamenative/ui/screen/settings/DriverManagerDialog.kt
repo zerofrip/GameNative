@@ -41,7 +41,9 @@ import app.gamenative.R
 import app.gamenative.ui.theme.settingsTileColors
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
+import app.gamenative.utils.DriverZipMetaPeek
 import com.winlator.contents.AdrenotoolsManager
+import com.winlator.contents.PanVkDriverManager
 import java.io.File
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -102,9 +104,14 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
     val driverMeta = remember { mutableStateMapOf<String, Pair<String, String>>() }
     var driverToDelete by remember { mutableStateOf<String?>(null) }
 
+    val installedPanvkDrivers = remember { mutableStateListOf<String>() }
+    val panvkMeta = remember { mutableStateMapOf<String, Pair<String, String>>() }
+
     val refreshDriverList: () -> Unit = {
         installedDrivers.clear()
         driverMeta.clear()
+        installedPanvkDrivers.clear()
+        panvkMeta.clear()
         try {
             val list = AdrenotoolsManager(ctx).enumarateInstalledDrivers()
             installedDrivers.addAll(list)
@@ -113,6 +120,12 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                 val name = mgr.getDriverName(id)
                 val version = mgr.getDriverVersion(id)
                 driverMeta[id] = name to version
+            }
+            val panList = PanVkDriverManager(ctx).enumerateInstalledDrivers()
+            installedPanvkDrivers.addAll(panList)
+            val pvm = PanVkDriverManager(ctx)
+            panList.forEach { id ->
+                panvkMeta[id] = pvm.getDriverName(id) to pvm.getDriverVersion(id)
             }
         } catch (_: Exception) {}
     }
@@ -274,6 +287,14 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
+
+                if (installedPanvkDrivers.isNotEmpty()) {
+                    Text(
+                        text = "Installed PanVK (manifest / Mali): ${installedPanvkDrivers.joinToString()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
 
                 // Online driver selection
                 if (isLoadingManifest) {
@@ -522,7 +543,20 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
 
 private fun handlePickedUri(context: Context, uri: Uri): String {
     return try {
-        val name = AdrenotoolsManager(context).installDriver(uri)
+        val stack = DriverZipMetaPeek.peekDriverStack(context, uri)?.lowercase()
+        val name = when (stack) {
+            "panvk" -> PanVkDriverManager(context).installDriver(uri)
+            "adrenotools" -> AdrenotoolsManager(context).installDriver(uri)
+            null, "" -> {
+                val a = AdrenotoolsManager(context).installDriver(uri)
+                if (a.isNotEmpty()) a else PanVkDriverManager(context).installDriver(uri)
+            }
+            else -> {
+                var n = AdrenotoolsManager(context).installDriver(uri)
+                if (n.isEmpty()) n = PanVkDriverManager(context).installDriver(uri)
+                n
+            }
+        }
         if (name.isNotEmpty()) {
             "Installed driver: $name"
         } else {

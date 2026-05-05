@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
+import com.winlator.contents.PanVkDriverManager
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertNotNull
@@ -45,7 +46,7 @@ class ManifestIdCorrelationTest {
     }
 
     private fun locateManifestFile(): File {
-        val workingDir = File(System.getProperty("user.dir"))
+        val workingDir = File(System.getProperty("user.dir") ?: ".")
         val direct = File(workingDir, "manifest.json")
         if (direct.exists()) return direct
         val parent = workingDir.parentFile
@@ -57,6 +58,34 @@ class ManifestIdCorrelationTest {
     }
 
     private suspend fun verifyDriverEntry(entry: ManifestEntry) {
+        if (entry.driverStack?.lowercase() == "panvk") {
+            val manager = PanVkDriverManager(context)
+            var installedId: String? = null
+            try {
+                println("PanVK driver download/install id=${entry.id} name=${entry.name} url=${entry.url}")
+                val result = ManifestInstaller.downloadAndInstallDriver(context, entry)
+                println("Driver install result id=${entry.id} success=${result.success} message=${result.message}")
+                assertTrue(
+                    "Driver install failed for ${entry.id}: ${result.message}",
+                    result.success,
+                )
+                val installed = manager.enumerateInstalledDrivers()
+                println("PanVK installed IDs: $installed")
+                installedId = installed.firstOrNull { it.equals(entry.id, ignoreCase = true) }
+                    ?: installed.firstOrNull()
+                println("Driver match id=${entry.id} matched=${installedId != null}")
+                assertTrue(
+                    "PanVK driver ID mismatch for ${entry.id}. Installed: $installed",
+                    installedId != null,
+                )
+            } finally {
+                if (installedId != null) {
+                    println("PanVK driver cleanup id=$installedId")
+                    manager.removeDriver(installedId)
+                }
+            }
+            return
+        }
         val manager = AdrenotoolsManager(context)
         var installedId: String? = null
         try {

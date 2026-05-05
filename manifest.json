@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-01-26",
+  "updatedAt": "2026-05-05",
   "items": {
     "driver": [
       {
@@ -589,6 +589,25 @@
         "id": "turnip_24.2.0_R19",
         "name": "turnip_v24.2.0_R19",
         "url": "https://downloads.gamenative.app/drivers/turnip_24.2.0_R19.zip",
+        "variant": "bionic"
+      },
+      {
+        "id": "freedreno-26.2.0-devel",
+        "name": "freedreno-26.2.0-devel",
+        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260505-1937-retry17/gamenative-freedreno-26.2.0-devel.zip",
+        "variant": "bionic"
+      },
+      {
+        "id": "panvk-26.2.0-devel",
+        "name": "panvk-26.2.0-devel",
+        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260505-1937-retry17/gamenative-panvk-26.2.0-devel.zip",
+        "variant": "bionic",
+        "driverStack": "panvk"
+      },
+      {
+        "id": "virpipe-26.2.0-devel",
+        "name": "virpipe-26.2.0-devel",
+        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260505-1937-retry17/gamenative-virpipe-26.2.0-devel.zip",
         "variant": "bionic"
       }
     ],

@@ -1,0 +1,6 @@
+{
+  "game_id": "example_game",
+  "renderer": "zink",
+  "require_custom_mesa": true,
+  "note": "Place an Adrenotools-style zip or extracted layout under files/container/lib, or install PanVK via ContentsManager (tier1) instead of this tier2 custom tree."
+}

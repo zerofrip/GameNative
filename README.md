@@ -2,6 +2,7 @@
 
 # GameNative
 
+This fork now integrates Mesa driver distribution for GameNative, including manifest entries for `freedreno`, `panvk`, and `virpipe` GameNative-ready packages.
 
 GameNative allows you to play games you own on Steam, Epic and GOG directly on Android devices, with cloud saves.
 
