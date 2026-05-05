@@ -94,13 +94,11 @@ jobs:
           unzip -o app-release.apks universal.apk
 
       - name: Copy lineage file
-        if: ${{ secrets.KEYSTORE_KEY_ALIAS != '' && secrets.KEYSTORE_KEY_PASSWORD != '' && secrets.KEYSTORE_STORE_PASSWORD != '' && secrets.PROD_KEYSTORE_KEY_ALIAS != '' && secrets.PROD_KEYSTORE_KEY_PASSWORD != '' && secrets.PROD_KEYSTORE_STORE_PASSWORD != '' }}
         run: |
           mkdir -p app/keystores
           cp prod-debug.lineage app/keystores/prod-debug.lineage
 
       - name: Dual sign universal APK
-        if: ${{ secrets.KEYSTORE_KEY_ALIAS != '' && secrets.KEYSTORE_KEY_PASSWORD != '' && secrets.KEYSTORE_STORE_PASSWORD != '' && secrets.PROD_KEYSTORE_KEY_ALIAS != '' && secrets.PROD_KEYSTORE_KEY_PASSWORD != '' && secrets.PROD_KEYSTORE_STORE_PASSWORD != '' }}
         env:
           DEBUG_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
           DEBUG_KEY_PASS: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
@@ -109,6 +107,10 @@ jobs:
           PROD_KEY_PASS: ${{ secrets.PROD_KEYSTORE_KEY_PASSWORD }}
           PROD_STORE_PASS: ${{ secrets.PROD_KEYSTORE_STORE_PASSWORD }}
         run: |
+          if [ -z "${DEBUG_ALIAS}" ] || [ -z "${DEBUG_KEY_PASS}" ] || [ -z "${DEBUG_STORE_PASS}" ] || [ -z "${PROD_ALIAS}" ] || [ -z "${PROD_KEY_PASS}" ] || [ -z "${PROD_STORE_PASS}" ]; then
+            echo "Skipping dual-sign: signing secrets are not configured."
+            exit 0
+          fi
           BUILD_TOOLS_DIR="${ANDROID_HOME}/build-tools/34.0.0"
           if [ ! -d "$BUILD_TOOLS_DIR" ]; then
             BUILD_TOOLS_DIR="${ANDROID_SDK_ROOT}/build-tools/34.0.0"
