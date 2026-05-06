@@ -68,6 +68,105 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: master
+          fetch-depth: 0
+
+      - name: Update manifest driver entry from dispatch payload
+        if: github.event_name == 'repository_dispatch'
+        env:
+          PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(os.environ.get("PAYLOAD_JSON", "{}"))
+
+          def pick_value(src, *paths):
+              for path in paths:
+                  cur = src
+                  ok = True
+                  for key in path:
+                      if not isinstance(cur, dict) or key not in cur:
+                          ok = False
+                          break
+                      cur = cur[key]
+                  if ok and cur not in (None, ""):
+                      return str(cur)
+              return ""
+
+          driver_id = pick_value(payload, ("id",), ("driver_id",), ("driver", "id"), ("release", "id"))
+          driver_name = pick_value(payload, ("name",), ("driver_name",), ("driver", "name"), ("release", "name"))
+          driver_url = pick_value(payload, ("url",), ("driver_url",), ("asset_url",), ("driver", "url"), ("release", "url"))
+          driver_stack = pick_value(payload, ("driver_stack",), ("stack",), ("driver", "stack"), ("release", "stack"))
+          previous_id = pick_value(payload, ("previous_id",), ("old_id",), ("driver", "previous_id"))
+
+          if not (driver_id and driver_name and driver_url):
+              print("No complete driver payload found; skipping manifest update.")
+              raise SystemExit(0)
+
+          manifest_path = Path("manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          drivers = manifest.get("items", {}).get("driver", [])
+
+          target_index = -1
+          stack_prefix = f"{driver_stack}-" if driver_stack else ""
+          for idx, item in enumerate(drivers):
+              item_id = str(item.get("id", ""))
+              item_stack = str(item.get("driverStack", ""))
+              if previous_id and item_id == previous_id:
+                  target_index = idx
+                  break
+              if driver_stack and (item_stack == driver_stack or item_id.startswith(stack_prefix)):
+                  target_index = idx
+                  break
+
+          new_item = {
+              "id": driver_id,
+              "name": driver_name,
+              "url": driver_url,
+              "variant": "bionic",
+          }
+          if driver_stack:
+              new_item["driverStack"] = driver_stack
+
+          if target_index >= 0:
+              updated = dict(drivers[target_index])
+              updated["id"] = driver_id
+              updated["name"] = driver_name
+              updated["url"] = driver_url
+              updated["variant"] = updated.get("variant", "bionic")
+              if driver_stack:
+                  updated["driverStack"] = driver_stack
+              drivers[target_index] = updated
+              print(f"Updated driver entry at index {target_index}: {driver_id}")
+          else:
+              drivers.insert(0, new_item)
+              print(f"Inserted new driver entry: {driver_id}")
+
+          manifest["items"]["driver"] = drivers
+          manifest_path.write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Commit manifest update
+        if: github.event_name == 'repository_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- manifest.json; then
+            echo "manifest.json not changed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "chore: update manifest driver entry from release dispatch"
+          git push origin HEAD:master
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
