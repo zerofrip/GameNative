@@ -258,6 +258,11 @@ object RendererManager {
             RendererMode.DXVK -> {
                 envVars.put("DXVK", "1")
                 envVars.put("DXVK_ASYNC", "1")
+                // DXVK is Vulkan-native. Avoid carrying over Zink/OpenGL routing from driver setup,
+                // which can interfere with device creation on some PanVK/Mali stacks.
+                envVars.remove("GALLIUM_DRIVER")
+                envVars.remove("MESA_LOADER_DRIVER_OVERRIDE")
+                envVars.remove("LIBGL_KOPPER_DISABLE")
             }
             RendererMode.ZINK -> {
                 envVars.put("MESA_LOADER_DRIVER_OVERRIDE", "zink")
