@@ -18,8 +18,11 @@ object ManifestRepository {
         val cachedManifest = parseManifest(cachedJson) ?: ManifestData.empty()
         val lastFetchedAt = PrefManager.componentManifestFetchedAt
         val isStale = System.currentTimeMillis() - lastFetchedAt >= ONE_DAY_MS
+        val hasCachedDrivers = cachedManifest.items[ManifestContentTypes.DRIVER].orEmpty().isNotEmpty()
 
-        if (cachedJson.isNotEmpty() && !isStale) {
+        // Re-fetch if cache is stale OR the cached manifest does not include any driver entries.
+        // This helps migrate users who still have old upstream-cached manifests.
+        if (cachedJson.isNotEmpty() && !isStale && hasCachedDrivers) {
             return cachedManifest
         }
 
