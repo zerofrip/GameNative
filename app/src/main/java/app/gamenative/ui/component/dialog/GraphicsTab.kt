@@ -240,7 +240,18 @@ fun GraphicsTabContent(state: ContainerConfigState) {
                 items = state.getVersionsForDriver(),
                 onItemSelected = {
                     state.graphicsDriverVersionIndex.value = it
-                    val selectedVersion = if (it == 0) "" else state.getVersionsForDriver()[it]
+                    val driverType = StringUtils.parseIdentifier(
+                        state.graphicsDrivers.value.getOrNull(state.graphicsDriverIndex.value).orEmpty(),
+                    )
+                    val versions = state.getVersionsForDriver()
+                    // Most static lists use index 0 as "default/empty", but PanVK list is
+                    // dynamic and starts directly with installed versions.
+                    val hasDefaultEmptyEntry = driverType != "panvk"
+                    val selectedVersion = if (hasDefaultEmptyEntry && it == 0) {
+                        ""
+                    } else {
+                        versions.getOrNull(it).orEmpty()
+                    }
                     state.config.value = config.copy(graphicsDriverVersion = selectedVersion)
                 },
             )
