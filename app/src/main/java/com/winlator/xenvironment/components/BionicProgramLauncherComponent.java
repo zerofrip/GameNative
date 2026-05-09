@@ -183,14 +183,15 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         // Get the number of enabled players directly from ControllerManager.
         final int enabledPlayerCount = MAX_PLAYERS;
+        final String gamepadBasePath = "/data/data/" + environment.getContext().getPackageName() + "/files/imagefs/tmp/";
         for (int i = 0; i < enabledPlayerCount; i++) {
             String memPath;
             if (i == 0) {
                 // Player 1 uses the original, non-numbered path that is known to work.
-                memPath = "/data/data/app.gamenative/files/imagefs/tmp/gamepad.mem";
+                memPath = gamepadBasePath + "gamepad.mem";
             } else {
                 // Players 2, 3, 4 use a 1-based index.
-                memPath = "/data/data/app.gamenative/files/imagefs/tmp/gamepad" + i + ".mem";
+                memPath = gamepadBasePath + "gamepad" + i + ".mem";
             }
 
             File memFile = new File(memPath);
