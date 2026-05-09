@@ -42,6 +42,10 @@ import app.gamenative.ui.theme.settingsTileColors
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
 import app.gamenative.utils.DriverZipMetaPeek
+import app.gamenative.utils.ManifestContentTypes
+import app.gamenative.utils.ManifestEntry
+import app.gamenative.utils.ManifestInstaller
+import app.gamenative.utils.ManifestRepository
 import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.PanVkDriverManager
 import java.io.File
@@ -59,21 +63,9 @@ import android.content.res.Configuration
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.service.SteamService
 import app.gamenative.ui.component.dialog.LoadingDialog
-import app.gamenative.utils.Net
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
-import okhttp3.Request
 import java.io.IOException
-import java.io.InputStream
-import java.net.URL
 import timber.log.Timber
 import java.net.SocketTimeoutException
-import java.nio.ByteBuffer
-import java.util.concurrent.TimeUnit
-import okhttp3.Response
-import java.io.FileOutputStream
-import kotlinx.coroutines.delay
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,7 +83,7 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     // Driver manifest handling
-    var driverManifest by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var driverManifest by remember { mutableStateOf<List<ManifestEntry>>(emptyList()) }
     var isLoadingManifest by remember { mutableStateOf(true) }
     var manifestError by remember { mutableStateOf<String?>(null) }
 
@@ -138,31 +130,19 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
         Timber.d("DriverManagerDialog: Fetching driver manifest...")
         scope.launch(Dispatchers.IO) {
             try {
-                val manifestUrl = "https://raw.githubusercontent.com/utkarshdalal/gamenative-landing-page/refs/heads/main/data/manifest.json"
-                val request = Request.Builder()
-                    .url(manifestUrl)
-                    .build()
-
-                val response = Net.http.newCall(request).execute()
-                if (response.isSuccessful) {
-                    val jsonString = response.body?.string() ?: "{}"
-                    val jsonObject = Json.decodeFromString<JsonObject>(jsonString)
-
-                    // Convert to map of String to String
-                    val manifest = jsonObject.entries.associate { it.key to it.value.toString().trim('"') }
-
-                    withContext(Dispatchers.Main) {
-                        driverManifest = manifest
-                        isLoadingManifest = false
+                val manifest = ManifestRepository.loadManifest(ctx)
+                val entries = manifest.items[ManifestContentTypes.DRIVER]
+                    .orEmpty()
+                    .filter { it.url.isNotBlank() }
+                    .sortedBy { it.id.lowercase() }
+                withContext(Dispatchers.Main) {
+                    driverManifest = entries
+                    isLoadingManifest = false
+                    if (entries.isEmpty()) {
+                        manifestError = ctx.getString(R.string.driver_error_loading, "No drivers found in manifest")
                     }
-                    Timber.d("DriverManagerDialog: Manifest loaded with ${manifest.size} entries")
-                } else {
-                    withContext(Dispatchers.Main) {
-                        manifestError = ctx.getString(R.string.driver_error_manifest, response.code)
-                        isLoadingManifest = false
-                    }
-                    Timber.w("DriverManagerDialog: Failed to load manifest HTTP=${response.code}")
                 }
+                Timber.d("DriverManagerDialog: Manifest loaded with ${entries.size} driver entries")
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     manifestError = ctx.getString(R.string.driver_error_loading, e.message ?: "")
@@ -194,7 +174,7 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
     }
 
     // Function to download and install a driver from URL
-    val downloadAndInstallDriver = { driverFileName: String ->
+    val downloadAndInstallDriver = { entry: ManifestEntry ->
         scope.launch {
             val overallStart = System.currentTimeMillis()
             isDownloading = true
@@ -202,14 +182,11 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
             downloadBytes = 0L
             totalBytes = -1L
             try {
-                Timber.d("DriverManagerDialog: Starting download drivers/$driverFileName")
-                val destFile = File(ctx.cacheDir, driverFileName)
+                Timber.d("DriverManagerDialog: Starting install from ${entry.url}")
                 var lastUpdate = 0L
-                // Use shared downloader with automatic domain fallback and built-in .part handling
-                SteamService.fetchFileWithFallback(
-                    fileName = "drivers/$driverFileName",
-                    dest = destFile,
-                    context = ctx
+                val result = ManifestInstaller.downloadAndInstallDriver(
+                    context = ctx,
+                    entry = entry,
                 ) { progress ->
                     val now = System.currentTimeMillis()
                     if (now - lastUpdate > 300) {
@@ -218,31 +195,13 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                         scope.launch(Dispatchers.Main) { downloadProgress = clamped }
                     }
                 }
-                // Mark download complete before installing
-                val downloadDurationMs = System.currentTimeMillis() - overallStart
-                val downloadedSize = destFile.length()
-                Timber.d("DriverManagerDialog: Download complete in ${downloadDurationMs}ms (${formatBytes(downloadedSize)})")
-                withContext(Dispatchers.Main) { isDownloading = false; downloadProgress = 1f; downloadBytes = downloadedSize }
-
-                // Install the driver from the temporary file
-                withContext(Dispatchers.Main) { isInstalling = true }
-                Timber.d("DriverManagerDialog: Starting install")
-                val uri = Uri.fromFile(destFile)
-                val installStart = System.currentTimeMillis()
-                val res = withContext(Dispatchers.IO) { handlePickedUri(ctx, uri) }
-                val installDurationMs = System.currentTimeMillis() - installStart
+                val durationMs = System.currentTimeMillis() - overallStart
                 withContext(Dispatchers.Main) {
-                    lastMessage = res
-                    if (res.startsWith("Installed driver:")) refreshDriverList()
-                    SnackbarManager.show(res)
+                    lastMessage = result.message
+                    if (result.success) refreshDriverList()
+                    SnackbarManager.show(result.message)
                 }
-                Timber.d("DriverManagerDialog: Install complete in ${installDurationMs}ms")
-                Timber.d("DriverManagerDialog: Download+Install total ${(System.currentTimeMillis() - overallStart)}ms")
-
-                // Delete the temporary file
-                withContext(Dispatchers.IO) {
-                    destFile.delete()
-                }
+                Timber.d("DriverManagerDialog: Download+Install finished in ${durationMs}ms")
             } catch (e: SocketTimeoutException) {
                 val errorMessage = ctx.getString(R.string.driver_timeout)
                 lastMessage = errorMessage
@@ -346,11 +305,11 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                             expanded = isExpanded,
                             onDismissRequest = { isExpanded = false }
                         ) {
-                            driverManifest.keys.forEach { driverKey ->
+                            driverManifest.forEach { driverEntry ->
                                 DropdownMenuItem(
-                                    text = { Text(driverKey) },
+                                    text = { Text(driverEntry.id) },
                                     onClick = {
-                                        selectedDriverKey = driverKey
+                                        selectedDriverKey = driverEntry.id
                                         isExpanded = false
                                     }
                                 )
@@ -358,14 +317,15 @@ fun DriverManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                         }
                     }
 
-                    if (selectedDriverKey.isNotEmpty() && driverManifest.containsKey(selectedDriverKey)) {
+                    val selectedEntry = driverManifest.firstOrNull { it.id == selectedDriverKey }
+                    if (selectedEntry != null) {
                         Row(
                             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.padding(top = 16.dp)
                         ) {
                             Button(
-                                onClick = { downloadAndInstallDriver(driverManifest[selectedDriverKey]!!) },
+                                onClick = { downloadAndInstallDriver(selectedEntry) },
                                 enabled = !isDownloading && !isImporting
                             ) {
                                 Text(stringResource(R.string.download))
