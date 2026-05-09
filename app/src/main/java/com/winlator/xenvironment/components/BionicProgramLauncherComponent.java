@@ -227,6 +227,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         // Use the ControllerManager's dynamic count for the environment variable
         envVars.put("EVSHIM_MAX_PLAYERS", String.valueOf(enabledPlayerCount));
+        envVars.put("EVSHIM_GAMEPAD_TMP", gamepadBasePath);
         if (true) {
             envVars.put("EVSHIM_SHM_ID", 1);
         }

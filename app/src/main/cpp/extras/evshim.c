@@ -170,8 +170,12 @@ static void initialize_all_pads(void)
     for (int i = 0; i < players; ++i) {
 
         char path[256];
+        const char *base = getenv("EVSHIM_GAMEPAD_TMP");
+        if (!base || !*base)
+            base = "/data/data/app.gamenative/files/imagefs/tmp/";
         snprintf(path, sizeof path,
-                 "/data/data/app.gamenative/files/imagefs/tmp/gamepad%s.mem",
+                 "%sgamepad%s.mem",
+                 base,
                  (i == 0) ? "" : (char[2]){'0' + i, '\0'});
 
         /* open once – store for reader + writer */
