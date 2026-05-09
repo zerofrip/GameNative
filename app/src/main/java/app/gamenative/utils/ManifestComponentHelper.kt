@@ -69,7 +69,14 @@ object ManifestComponentHelper {
     suspend fun loadInstalledContentLists(
         context: Context,
     ): InstalledContentListsAndDrivers = withContext(Dispatchers.IO) {
-        val installedDrivers = AdrenotoolsManager(context).enumarateInstalledDrivers()
+        val adrenotoolsManager = AdrenotoolsManager(context)
+        val installedDriverIds = adrenotoolsManager.enumarateInstalledDrivers()
+        // Some driver zips may expose a display name in meta.json that differs from the
+        // folder ID returned by enumarateInstalledDrivers(). Include both so manifest IDs
+        // can be recognized as installed after download.
+        val installedDrivers = (installedDriverIds + installedDriverIds.mapNotNull { id ->
+            adrenotoolsManager.getDriverName(id).takeIf { it.isNotBlank() }
+        }).distinct()
 
         val installedContent = try {
             val mgr = ContentsManager(context)
