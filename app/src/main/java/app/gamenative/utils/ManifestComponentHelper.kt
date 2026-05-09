@@ -155,11 +155,20 @@ object ManifestComponentHelper {
             options[label] = VersionOption(label, label, false, true)
         }
 
-        val availableIds = options.keys.toSet()
+        val availableIds = options.keys.toList()
         manifest.forEach { entry ->
-            if (!options.containsKey(entry.id)) {
-                val isInstalled = availableIds.contains(entry.id)
-                options[entry.id] = VersionOption(entry.id, entry.id, isManifest = true, isInstalled = isInstalled)
+            val alreadyPresent = availableIds.any { existing ->
+                existing.equals(entry.id, ignoreCase = true) ||
+                    StringUtils.parseIdentifier(existing) == StringUtils.parseIdentifier(entry.id)
+            }
+            if (!alreadyPresent) {
+                val isInstalled = versionExists(entry.id, base + installed)
+                options[entry.id] = VersionOption(
+                    label = entry.id,
+                    id = entry.id,
+                    isManifest = true,
+                    isInstalled = isInstalled,
+                )
             }
         }
 
