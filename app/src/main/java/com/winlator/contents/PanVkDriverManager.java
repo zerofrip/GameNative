@@ -179,13 +179,14 @@ public class PanVkDriverManager {
                 }
             }
         }
+        File libDir = new File(root, libRel.replace("/", File.separator));
         if (icd.isFile()) {
-            envVars.put("VK_ICD_FILENAMES", icd.getAbsolutePath());
+            File resolvedIcd = resolveIcdForRuntime(root, icd, libDir);
+            envVars.put("VK_ICD_FILENAMES", resolvedIcd.getAbsolutePath());
         } else {
             Log.w(TAG, "No Vulkan ICD found under " + root.getAbsolutePath());
         }
 
-        File libDir = new File(root, libRel.replace("/", File.separator));
         String libPath = libDir.isDirectory() ? libDir.getAbsolutePath() : root.getAbsolutePath();
         String existing = envVars.get("LD_LIBRARY_PATH");
         if (existing == null || existing.isEmpty()) {
@@ -201,5 +202,43 @@ public class PanVkDriverManager {
             envVars.put("MESA_VK_WSI_PRESENT_MODE", "mailbox");
         }
         envVars.put("vblank_mode", "0");
+    }
+
+    /**
+     * Some upstream ICD JSONs ship library_path values like /usr/local/lib/libvulkan_panfrost.so
+     * that are invalid inside our app sandbox layout. Patch a runtime copy when needed.
+     */
+    private File resolveIcdForRuntime(File root, File icdFile, File libDir) {
+        try {
+            JSONObject json = new JSONObject(FileUtils.readString(icdFile));
+            JSONObject icd = json.optJSONObject("ICD");
+            if (icd == null) return icdFile;
+
+            String declaredLibraryPath = icd.optString("library_path", "");
+            if (declaredLibraryPath.isEmpty()) return icdFile;
+
+            File declared = new File(declaredLibraryPath);
+            if (declared.isFile()) return icdFile;
+
+            String libName = declared.getName();
+            if (libName.isEmpty()) return icdFile;
+
+            File candidate = new File(libDir, libName);
+            if (!candidate.isFile()) {
+                candidate = new File(root, libName);
+            }
+            if (!candidate.isFile()) {
+                return icdFile;
+            }
+
+            icd.put("library_path", candidate.getAbsolutePath());
+            File patched = new File(root, ".resolved_" + icdFile.getName());
+            if (FileUtils.writeString(patched, json.toString())) {
+                return patched;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to resolve ICD path for runtime: " + icdFile.getAbsolutePath(), e);
+        }
+        return icdFile;
     }
 }
