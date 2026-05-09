@@ -4,6 +4,7 @@ import android.content.Context
 import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
+import com.winlator.contents.PanVkDriverManager
 import com.winlator.core.GPUHelper
 import com.winlator.core.StringUtils
 import kotlinx.coroutines.Dispatchers
@@ -71,12 +72,21 @@ object ManifestComponentHelper {
     ): InstalledContentListsAndDrivers = withContext(Dispatchers.IO) {
         val adrenotoolsManager = AdrenotoolsManager(context)
         val installedDriverIds = adrenotoolsManager.enumarateInstalledDrivers()
+        val panvkManager = PanVkDriverManager(context)
+        val installedPanvkIds = panvkManager.enumerateInstalledDrivers()
         // Some driver zips may expose a display name in meta.json that differs from the
         // folder ID returned by enumarateInstalledDrivers(). Include both so manifest IDs
         // can be recognized as installed after download.
-        val installedDrivers = (installedDriverIds + installedDriverIds.mapNotNull { id ->
-            adrenotoolsManager.getDriverName(id).takeIf { it.isNotBlank() }
-        }).distinct()
+        val installedDrivers = (
+            installedDriverIds +
+                installedDriverIds.mapNotNull { id ->
+                    adrenotoolsManager.getDriverName(id).takeIf { it.isNotBlank() }
+                } +
+                installedPanvkIds +
+                installedPanvkIds.mapNotNull { id ->
+                    panvkManager.getDriverName(id).takeIf { it.isNotBlank() }
+                }
+            ).distinct()
 
         val installedContent = try {
             val mgr = ContentsManager(context)
