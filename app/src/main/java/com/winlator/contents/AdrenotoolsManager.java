@@ -146,7 +146,7 @@ public class AdrenotoolsManager {
 
     public String installDriver(Uri driverUri) {
         File tmpDir = new File(adrenotoolsContentDir, "tmp");
-        if (tmpDir.exists()) tmpDir.delete();
+        if (tmpDir.exists()) FileUtils.delete(tmpDir);
         tmpDir.mkdirs();
         ZipInputStream zis;
         InputStream is;
@@ -158,7 +158,13 @@ public class AdrenotoolsManager {
             ZipEntry entry = zis.getNextEntry();
             while (entry != null) {
                 File dstFile = new File(tmpDir, entry.getName());
-                Files.copy(zis, dstFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                if (entry.isDirectory()) {
+                    dstFile.mkdirs();
+                } else {
+                    File parent = dstFile.getParentFile();
+                    if (parent != null && !parent.exists()) parent.mkdirs();
+                    Files.copy(zis, dstFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
                 entry = zis.getNextEntry();
             }
             zis.close();
