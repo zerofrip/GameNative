@@ -9,6 +9,7 @@ import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
 import com.winlator.contents.PanVkDriverManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -21,6 +22,31 @@ data class ManifestInstallResult(
 )
 
 object ManifestInstaller {
+    private suspend fun fetchFileWithRetries(
+        url: String,
+        destFile: File,
+        onProgress: (Float) -> Unit,
+        attempts: Int = 3,
+    ) {
+        var lastError: Throwable? = null
+        repeat(attempts) { index ->
+            try {
+                SteamService.fetchFile(url, destFile, onProgress)
+                return
+            } catch (e: Exception) {
+                lastError = e
+                val msg = e.message.orEmpty()
+                val isHttp5xx = msg.startsWith("HTTP 5")
+                val shouldRetry = index < attempts - 1 && (isHttp5xx || e is java.io.IOException)
+                if (!shouldRetry) throw e
+                val backoffMs = (index + 1) * 1500L
+                Timber.w(e, "ManifestInstaller: retrying driver download (${index + 1}/$attempts) in ${backoffMs}ms for $url")
+                delay(backoffMs)
+            }
+        }
+        throw lastError ?: IllegalStateException("Failed to download file: $url")
+    }
+
     suspend fun downloadAndInstallDriver(
         context: Context,
         entry: ManifestEntry,
@@ -29,7 +55,7 @@ object ManifestInstaller {
         var destFile: File? = null
         try {
             destFile = File(context.cacheDir, entry.url.substringAfterLast("/"))
-            SteamService.fetchFile(entry.url, destFile, onProgress)
+            fetchFileWithRetries(entry.url, destFile, onProgress)
             val uri = Uri.fromFile(destFile)
             val stack = entry.driverStack?.lowercase()
             val name = if (stack == "panvk") {
