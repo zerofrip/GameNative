@@ -3008,10 +3008,16 @@ private fun setupXEnvironment(
     // explicitly enable or disable Wine debug channels
     envVars.put(
         "WINEDEBUG",
-        if (enableWineDebug && wineDebugChannels.isNotEmpty())
-            "+" + wineDebugChannels.replace(",", ",+")
-        else
-            "-all",
+        if (enableWineDebug) {
+            if (wineDebugChannels.isNotEmpty()) {
+                "+" + wineDebugChannels.replace(",", ",+")
+            } else {
+                // If debug is enabled but no channels were configured, default to useful crash diagnostics.
+                "+err,+warn,+fixme,+loaddll"
+            }
+        } else {
+            "-all"
+        },
     )
     // capture debug output to file if either Wine or Box86/64 logging is enabled
     var logFile: File? = null
