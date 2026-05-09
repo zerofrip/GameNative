@@ -122,7 +122,7 @@ private fun Preview_WebView() {
     PluviaTheme {
         WebViewDialog(
             isVisible = true,
-            url = "https://github.com/utkarshdalal/GameNative",
+            url = "https://github.com/zerofrip/GameNative",
             onDismissRequest = {
                 println("WE CAN GO BACK!")
             },
