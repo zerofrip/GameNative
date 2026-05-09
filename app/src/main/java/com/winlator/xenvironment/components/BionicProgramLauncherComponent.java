@@ -177,6 +177,16 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         this.workingDir = workingDir;
     }
 
+    private static void ensurePathInEnvVar(EnvVars envVars, String key, String requiredPath, boolean prepend) {
+        String current = envVars.get(key);
+        if (current == null || current.isEmpty()) {
+            envVars.put(key, requiredPath);
+            return;
+        }
+        if (current.contains(requiredPath)) return;
+        envVars.put(key, prepend ? (requiredPath + ":" + current) : (current + ":" + requiredPath));
+    }
+
     private int execGuestProgram() {
 
         final int MAX_PLAYERS = 1; // old static method
@@ -316,6 +326,9 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (this.envVars != null) {
             envVars.putAll(this.envVars);
         }
+        // Keep PanVK (or custom) paths, but always include base runtime search paths needed by Wine.
+        ensurePathInEnvVar(envVars, "LD_LIBRARY_PATH", rootDir.getPath() + "/usr/lib", false);
+        ensurePathInEnvVar(envVars, "LD_LIBRARY_PATH", "/system/lib64", false);
 
         if (LsfgVkManager.isSupported(container)) {
             LsfgVkManager.ensureRuntimeInstalled(environment.getContext(), container);
