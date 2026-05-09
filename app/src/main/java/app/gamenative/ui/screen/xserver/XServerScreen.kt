@@ -4776,6 +4776,9 @@ private fun extractGraphicsDriverFiles(
         val isAdrenotoolsTurnip: String? = graphicsDriverConfig.get("adrenotoolsTurnip", "1") // Default to "1"
 
         selectedDriverVersion = currentWrapperVersion
+        val panVkDriverManager = PanVkDriverManager(context)
+        val isPanVkManifestDriver = selectedDriverVersion != null &&
+            panVkDriverManager.enumerateInstalledDrivers().contains(selectedDriverVersion)
 
         adrenoToolsDriverId =
             if (selectedDriverVersion!!.contains(DefaultVersion.WRAPPER)) DefaultVersion.WRAPPER else selectedDriverVersion
@@ -4799,12 +4802,16 @@ private fun extractGraphicsDriverFiles(
             envVars.put("MESA_VK_WSI_DEBUG", "sw")
         }
 
-        if (currentWrapperVersion.lowercase(Locale.getDefault())
-                .contains("turnip") && isAdrenotoolsTurnip == "0"
-        ) envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir().path + "/vulkan/icd.d/freedreno_icd.aarch64.json")
-        else envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir().path + "/vulkan/icd.d/wrapper_icd.aarch64.json")
-        envVars.put("GALLIUM_DRIVER", "zink")
-        envVars.put("LIBGL_KOPPER_DISABLE", "true")
+        if (isPanVkManifestDriver) {
+            panVkDriverManager.applyManifestDriver(envVars, imageFs, selectedDriverVersion)
+        } else {
+            if (currentWrapperVersion.lowercase(Locale.getDefault())
+                    .contains("turnip") && isAdrenotoolsTurnip == "0"
+            ) envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir().path + "/vulkan/icd.d/freedreno_icd.aarch64.json")
+            else envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir().path + "/vulkan/icd.d/wrapper_icd.aarch64.json")
+            envVars.put("GALLIUM_DRIVER", "zink")
+            envVars.put("LIBGL_KOPPER_DISABLE", "true")
+        }
 
         // 1. Get the main WRAPPER selection (e.g., "Wrapper-v2") from the class field.
         val mainWrapperSelection: String = graphicsDriver
@@ -4843,7 +4850,7 @@ private fun extractGraphicsDriverFiles(
             }
         }
 
-        if (adrenoToolsDriverId !== "System") {
+        if (!isPanVkManifestDriver && adrenoToolsDriverId !== "System") {
             val adrenotoolsManager: AdrenotoolsManager = AdrenotoolsManager(context)
             adrenotoolsManager.setDriverById(envVars, imageFs, adrenoToolsDriverId)
         }
