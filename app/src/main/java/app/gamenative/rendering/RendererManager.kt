@@ -143,6 +143,14 @@ object RendererManager {
 
         var mode = resolveEffectiveMode(context, container, gameConfig)
 
+        // PanVK stacks are Vulkan-first; forcing WineD3D on Mali can still trigger
+        // Steam/game Vulkan probing paths and crash early. Prefer DXVK when PanVK is active.
+        val isPanVkRuntime = envVars.get("VK_ICD_FILENAMES").contains("panvk_manifest")
+        if (mode == RendererMode.WINED3D && isPanVkRuntime) {
+            Timber.tag(TAG).i("PanVK runtime detected; switching renderer mode from WineD3D to DXVK")
+            mode = RendererMode.DXVK
+        }
+
         if (mode == null) {
             Timber.tag(TAG).d("No renderer profile (non-Mali default); driver env unchanged by RendererManager")
             logMesaDiagnostics(context, envVars, null)
