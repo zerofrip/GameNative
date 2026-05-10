@@ -1390,9 +1390,13 @@ fun XServerScreen(
             Timber.i("onPlayingBlocked")
             showPlayingBlockedDialog = true
         }
-        val debugCallback = Callback<String> { outputLine ->
-            Timber.i(outputLine ?: "")
-        }
+        // Mirroring every Wine/Box64 stdout line to Timber/logcat is extremely costly under
+        // game load: it serialises hundreds-to-thousands of log lines per second, blocks the
+        // pipe reader, and can starve the Wine process. Only attach this callback when the
+        // user has explicitly enabled Wine debug logging.
+        val debugCallback: Callback<String>? = if (PrefManager.enableWineDebug) {
+            Callback<String> { outputLine -> Timber.i(outputLine ?: "") }
+        } else null
 
         PluviaApp.events.on<AndroidEvent.ActivityDestroyed, Unit>(onActivityDestroyed)
         PluviaApp.events.on<AndroidEvent.KeyEvent, Boolean>(onKeyEvent)
@@ -1400,7 +1404,7 @@ fun XServerScreen(
         PluviaApp.events.on<AndroidEvent.GuestProgramTerminated, Unit>(onGuestProgramTerminated)
         PluviaApp.events.on<SteamEvent.ForceCloseApp, Unit>(onForceCloseApp)
         PluviaApp.events.on<SteamEvent.PlayingBlocked, Unit>(onPlayingBlocked)
-        ProcessHelper.addDebugCallback(debugCallback)
+        if (debugCallback != null) ProcessHelper.addDebugCallback(debugCallback)
 
         onDispose {
             PluviaApp.events.off<AndroidEvent.ActivityDestroyed, Unit>(onActivityDestroyed)
@@ -1409,7 +1413,7 @@ fun XServerScreen(
             PluviaApp.events.off<AndroidEvent.GuestProgramTerminated, Unit>(onGuestProgramTerminated)
             PluviaApp.events.off<SteamEvent.ForceCloseApp, Unit>(onForceCloseApp)
             PluviaApp.events.off<SteamEvent.PlayingBlocked, Unit>(onPlayingBlocked)
-            ProcessHelper.removeDebugCallback(debugCallback)
+            if (debugCallback != null) ProcessHelper.removeDebugCallback(debugCallback)
         }
     }
 

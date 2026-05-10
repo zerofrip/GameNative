@@ -174,7 +174,9 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         File rootDir = imageFs.getRootDir();
 
         PrefManager.init(context);
-        boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", true);
+        // Default OFF: matches the settings UI default. When true, Box64 emits per-load and
+        // per-dynarec stdout spam that is piped through ProcessHelper, stalling Wine under load.
+        boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", false);
 
         EnvVars envVars = new EnvVars();
         addBox64EnvVars(envVars, enableBox86_64Logs);

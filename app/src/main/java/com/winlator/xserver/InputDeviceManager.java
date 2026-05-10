@@ -20,6 +20,10 @@ import com.winlator.xserver.events.PointerWindowEvent;
 
 public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyboard.OnKeyboardListener, WindowManager.OnWindowModificationListener, XResourceManager.OnResourceLifecycleListener {
     private static final byte MOUSE_WHEEL_DELTA = 120;
+    /** Suppresses duplicate MotionNotify spam (same root coords + target window) — reduces Wine/X11 load under touch drift or high-rate pointers. */
+    private short lastMotionSentRootX = Short.MIN_VALUE;
+    private short lastMotionSentRootY = Short.MIN_VALUE;
+    private int lastMotionSentEventWindowId = -1;
     private Window pointWindow;
     private final XServer xServer;
     private final Handler autoRepeatHandler = new Handler(Looper.getMainLooper());
@@ -213,6 +217,14 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
 
         if (grabWindow != null || window != null) {
             Window eventWindow = window != null ? window : grabWindow;
+            int wid = eventWindow.id;
+            if (wid == lastMotionSentEventWindowId && x == lastMotionSentRootX && y == lastMotionSentRootY) {
+                return;
+            }
+            lastMotionSentEventWindowId = wid;
+            lastMotionSentRootX = x;
+            lastMotionSentRootY = y;
+
             short[] localPoint = eventWindow.rootPointToLocal(x, y);
 
             Window child = eventWindow.isAncestorOf(pointWindow) ? pointWindow : null;

@@ -17,7 +17,12 @@ import java.util.List;
 import java.util.concurrent.Executors;
 
 public abstract class ProcessHelper {
-    public static final boolean PRINT_DEBUG = true; // FIXME change to false
+    /**
+     * When true, every Wine/Box64 stdout/stderr line is mirrored to {@link System#out}, which goes
+     * through logcat. Under heavy game load this causes severe frame stalls because the Wine pipe
+     * blocks on a slow reader. Keep false in production.
+     */
+    public static final boolean PRINT_DEBUG = false;
     private static final ArrayList<Callback<String>> debugCallbacks = new ArrayList<>();
     private static final byte SIGCONT = 18;
     private static final byte SIGSTOP = 19;
@@ -136,10 +141,11 @@ public abstract class ProcessHelper {
             pid = pidField.getInt(process);
             pidField.setAccessible(false);
 
-            if (!debugCallbacks.isEmpty()) {
-                createDebugThread(process.getInputStream());
-                createDebugThread(process.getErrorStream());
-            }
+            // Always drain the child's stdout/stderr — even if no callbacks are registered.
+            // If we don't, the kernel pipe buffer fills and Wine blocks on its next write,
+            // which surfaces as frame stalls (huge FPS drops under load).
+            createDebugThread(process.getInputStream());
+            createDebugThread(process.getErrorStream());
 //            Uncomment the following lines to see logs from wine
 //            createDebugThread(process.getInputStream(), "STDOUT", pid);
 //            createDebugThread(process.getErrorStream(), "STDERR", pid);
@@ -218,11 +224,15 @@ public abstract class ProcessHelper {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     if (PRINT_DEBUG) System.out.println(line);
+                    // Snapshot under the lock so the per-line callback dispatch happens
+                    // without holding the monitor — addDebugCallback / per-line file writes
+                    // would otherwise contend on every game log line.
+                    Callback<String>[] snapshot;
                     synchronized (debugCallbacks) {
-                        if (!debugCallbacks.isEmpty()) {
-                            for (Callback<String> callback : debugCallbacks) callback.call(line);
-                        }
+                        if (debugCallbacks.isEmpty()) continue;
+                        snapshot = debugCallbacks.toArray(new Callback[0]);
                     }
+                    for (Callback<String> callback : snapshot) callback.call(line);
                 }
             }
             catch (IOException e) {

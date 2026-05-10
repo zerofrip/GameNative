@@ -6,6 +6,7 @@ import com.winlator.core.envvars.EnvVars;
 import com.winlator.xenvironment.ImageFs;
 
 import java.io.File;
+import java.util.Locale;
 
 public class DXVKHelper {
     public static final String DEFAULT_CONFIG = "version="+DefaultVersion.DXVK+",framerate=0,maxDeviceMemory=0";
@@ -18,8 +19,12 @@ public class DXVKHelper {
     public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
         ImageFs imageFs = ImageFs.find(context);
         envVars.put("DXVK_STATE_CACHE_PATH", "/data/data/" + context.getPackageName() + "/files/imagefs" + ImageFs.CACHE_PATH);
-        // Keep DXVK logs enabled by default while diagnosing startup/display failures.
-        envVars.put("DXVK_LOG_LEVEL", "info");
+        // DXVK at info-level logs every pipeline compile / shader load to stderr. Under heavy
+        // game load that floods the debug pipe and stalls Wine, causing visible FPS drops.
+        // Default to silent; users can override via the container's env vars when diagnosing.
+        if (!envVars.has("DXVK_LOG_LEVEL")) {
+            envVars.put("DXVK_LOG_LEVEL", "none");
+        }
 
         File rootDir = ImageFs.find(context).getRootDir();
         File dxvkConfigFile = new File(imageFs.config_path+"/dxvk.conf");
@@ -49,6 +54,13 @@ public class DXVKHelper {
         }
         if (config.getBoolean("constantBufferRangeCheck")) {
             content = content + "d3d11.constantBufferRangeCheck = \"True\"\n";
+        }
+
+        // GPL builds: prefer explicit Graphics Pipeline Library usage so DXVK does not fall back
+        // to slower pipeline paths when the driver supports VK_EXT_graphics_pipeline_library.
+        String dxvkVersion = config.get("version");
+        if (!dxvkVersion.isEmpty() && dxvkVersion.toLowerCase(Locale.US).contains("gplasync")) {
+            content = content + "dxvk.enableGraphicsPipelineLibrary = True\n";
         }
 
         String async = config.get("async");

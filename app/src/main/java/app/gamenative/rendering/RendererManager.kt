@@ -195,6 +195,7 @@ object RendererManager {
         applyExclusiveProfile(mode, envVars)
         if (mode == RendererMode.DXVK) {
             applyDxvkAsyncPipelineEnvFromContainer(container, envVars)
+            applyDxvkCompileLayerHints(envVars)
         }
 
         envVars.put("GAMENATIVE_RENDERER", mode.wireValue)
@@ -296,6 +297,19 @@ object RendererManager {
             envVars.put("DXVK_GPLASYNCCACHE", "1")
         } else {
             envVars.remove("DXVK_GPLASYNCCACHE")
+        }
+    }
+
+    /**
+     * Reduces repeated SPIR-V disk cache churn and driver recompiles when env vars were stripped
+     * from the container; does not override explicit user settings.
+     */
+    private fun applyDxvkCompileLayerHints(envVars: EnvVars) {
+        if (!envVars.has("MESA_SHADER_CACHE_DISABLE")) {
+            envVars.put("MESA_SHADER_CACHE_DISABLE", "false")
+        }
+        if (!envVars.has("MESA_SHADER_CACHE_MAX_SIZE")) {
+            envVars.put("MESA_SHADER_CACHE_MAX_SIZE", "512MB")
         }
     }
 
