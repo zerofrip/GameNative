@@ -100,6 +100,13 @@ android {
             useSupportLibrary = true
         }
 
+        externalNativeBuild {
+            cmake {
+                /* Pure C shim; avoid libc++_shared which duplicates jniLibs merge */
+                arguments += "-DANDROID_STL=system"
+            }
+        }
+
         proguardFiles(
             // getDefaultProguardFile("proguard-android-optimize.txt"),
             getDefaultProguardFile("proguard-android.txt"),
@@ -177,6 +184,13 @@ android {
 
     kotlinter {
         ignoreFormatFailures  = false
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/redirect_bionic/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // xconnectorpatch is shipped as a prebuilt jniLib because our APK packaging flow

@@ -293,13 +293,23 @@ public class Container {
         this.drives = migrateLegacyDataPaths(drives);
     }
 
-    /** Rewrite paths baked for {@code app.gamenative} when using a different {@link BuildConfig#APPLICATION_ID}. */
+    /**
+     * Rewrite paths baked for {@code app.gamenative} when using a different {@link BuildConfig#APPLICATION_ID}
+     * (e.g. {@code app.gamenative.mesa}). Covers both {@code /data/data/...} and {@code /data/user/0/...} forms.
+     */
     private static String migrateLegacyDataPaths(String value) {
         if (value == null || value.isEmpty()) return value;
-        String legacy = "/data/data/app.gamenative/";
-        String resolved = "/data/data/" + BuildConfig.APPLICATION_ID + "/";
-        if (legacy.equals(resolved) || !value.contains(legacy)) return value;
-        return value.replace(legacy, resolved);
+        String id = BuildConfig.APPLICATION_ID;
+        String[][] pairs = {
+                {"/data/data/app.gamenative/", "/data/data/" + id + "/"},
+                {"/data/user/0/app.gamenative/", "/data/user/0/" + id + "/"},
+        };
+        String out = value;
+        for (String[] p : pairs) {
+            if (p[0].equals(p[1]) || !out.contains(p[0])) continue;
+            out = out.replace(p[0], p[1]);
+        }
+        return out;
     }
 
     public String getLC_ALL() {

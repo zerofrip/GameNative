@@ -18,7 +18,8 @@ public class DXVKHelper {
     public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
         ImageFs imageFs = ImageFs.find(context);
         envVars.put("DXVK_STATE_CACHE_PATH", "/data/data/" + context.getPackageName() + "/files/imagefs" + ImageFs.CACHE_PATH);
-        envVars.put("DXVK_LOG_LEVEL", "none");
+        // Keep DXVK logs enabled by default while diagnosing startup/display failures.
+        envVars.put("DXVK_LOG_LEVEL", "info");
 
         File rootDir = ImageFs.find(context).getRootDir();
         File dxvkConfigFile = new File(imageFs.config_path+"/dxvk.conf");

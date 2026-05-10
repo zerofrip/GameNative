@@ -24,6 +24,7 @@ public abstract class DefaultVersion {
     public static String VARIANT = Container.GLIBC;
     public static String DEFAULT_GRAPHICS_DRIVER = "vortek";
     public static String WINE_VERSION = com.winlator.core.WineInfo.MAIN_WINE_VERSION.identifier();
-    public static String ASYNC = "1";
+    /** Default off: async pipeline compile reduces load stalls but often causes motion judder on mobile GPUs. */
+    public static String ASYNC = "0";
     public static String ASYNC_CACHE = "0";
 }

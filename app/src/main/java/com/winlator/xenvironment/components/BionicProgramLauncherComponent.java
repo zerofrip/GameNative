@@ -235,6 +235,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         EnvVars envVars = new EnvVars();
 
+        envVars.put("GAMENATIVE_HOST_DATA_DIR", context.getDataDir().getAbsolutePath());
+
         // Use the ControllerManager's dynamic count for the environment variable
         envVars.put("EVSHIM_MAX_PLAYERS", String.valueOf(enabledPlayerCount));
         envVars.put("EVSHIM_GAMEPAD_TMP", gamepadBasePath);
@@ -477,6 +479,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         File rootDir = imageFs.getRootDir();
         StringBuilder output = new StringBuilder();
         EnvVars envVars = new EnvVars();
+        envVars.put("GAMENATIVE_HOST_DATA_DIR", context.getDataDir().getAbsolutePath());
         addBox64EnvVars(envVars, false);
 
         envVars.put("HOME", imageFs.home_path);

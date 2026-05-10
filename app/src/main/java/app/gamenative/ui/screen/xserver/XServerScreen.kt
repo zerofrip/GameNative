@@ -1939,6 +1939,7 @@ fun XServerScreen(
                                 containerVariantChanged,
                                 onGameLaunchError,
                                 navigateBack,
+                                gameLaunchConfig,
                             )
                             if (!PluviaApp.isActivityInForeground && !neverSuspend) {
                                 PluviaApp.xEnvironment?.onPause()
@@ -2960,6 +2961,7 @@ private fun setupXEnvironment(
     containerVariantChanged: Boolean,
     onGameLaunchError: ((String) -> Unit)? = null,
     navigateBack: () -> Unit,
+    gameLaunchConfig: GameLaunchConfig? = null,
 ): XEnvironment {
     ProcessHelper.hardKillStaleWineProcesses()
 
@@ -3012,8 +3014,8 @@ private fun setupXEnvironment(
             if (wineDebugChannels.isNotEmpty()) {
                 "+" + wineDebugChannels.replace(",", ",+")
             } else {
-                // If debug is enabled but no channels were configured, default to useful crash diagnostics.
-                "+err,+warn,+fixme,+loaddll"
+                // Keep default diagnostics lightweight; +loaddll produces massive I/O and can tank frame pacing.
+                "+err,+warn,+fixme"
             }
         } else {
             "-all"
@@ -3029,11 +3031,38 @@ private fun setupXEnvironment(
         if (logFile.exists()) logFile.delete()
     }
 
-    ProcessHelper.addDebugCallback { line ->
-        if (captureLogs) {
-            logFile?.appendText(line + "\n")
+    val logBufferLock = Any()
+    val logBuffer = StringBuilder()
+    var lastLogFlushMs = System.currentTimeMillis()
+
+    fun flushLogBuffer(force: Boolean) {
+        if (!captureLogs) return
+        val chunk = synchronized(logBufferLock) {
+            val now = System.currentTimeMillis()
+            if (!force && logBuffer.length < 8_192 && now - lastLogFlushMs < 200L) {
+                return@synchronized null
+            }
+            if (logBuffer.isEmpty()) return@synchronized null
+            val text = logBuffer.toString()
+            logBuffer.setLength(0)
+            lastLogFlushMs = now
+            text
+        }
+        if (chunk != null) {
+            logFile?.appendText(chunk)
         }
     }
+
+    ProcessHelper.addDebugCallback { line ->
+        if (captureLogs) {
+            synchronized(logBufferLock) {
+                logBuffer.append(line).append('\n')
+            }
+            flushLogBuffer(force = false)
+        }
+    }
+
+    flushLogBuffer(force = true)
 
     val rootPath = imageFs.getRootDir().getPath()
     FileUtils.clear(imageFs.getTmpDir())
@@ -3094,6 +3123,15 @@ private fun setupXEnvironment(
         guestProgramLauncherComponent.setSteamType(container.getSteamType())
 
         envVars.putAll(container.envVars)
+        // Container stored env is merged last and can override graphics/renderer keys set earlier
+        // (RendererManager + PanVK). Re-apply renderer profile so WineD3D/DXVK/Zink stay consistent.
+        RendererManager.applyToLaunchEnv(
+            context,
+            imageFs,
+            envVars,
+            container,
+            gameLaunchConfig,
+        )
         if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1")
         val graphicsDriverConfig = KeyValueSet(container.getGraphicsDriverConfig())
         if (graphicsDriverConfig.get("version").lowercase(Locale.getDefault()).contains("gen8")) {
@@ -4212,6 +4250,9 @@ private fun setupWineSystemFiles(
         )
     }
 
+    // PanVK + WineD3D used to be coerced to DXVK here; that prevented ever launching with WineD3D when selected.
+    // RendererManager still upgrades *implicit* Mali WineD3D to DXVK on PanVK unless the wrapper is wined3d.
+
     val needReextract = ALWAYS_REEXTRACT || xServerState.value.dxwrapper != container.getExtra("dxwrapper") || variantChanged || wineVersionChanged
 
     Timber.i("needReextract is " + needReextract)
@@ -4219,7 +4260,7 @@ private fun setupWineSystemFiles(
     Timber.i("container.getExtra(\"dxwrapper\") is " + container.getExtra("dxwrapper"))
 
     if (needReextract) {
-        extractDXWrapperFiles(
+        val effectiveDxWrapper = extractDXWrapperFiles(
             context,
             firstTimeBoot,
             container,
@@ -4229,7 +4270,15 @@ private fun setupWineSystemFiles(
             contentsManager,
             onExtractFileListener,
         )
-        container.putExtra("dxwrapper", xServerState.value.dxwrapper)
+        if (effectiveDxWrapper != xServerState.value.dxwrapper) {
+            Timber.i(
+                "DXVK wrapper id normalized to %s (was %s)",
+                effectiveDxWrapper,
+                xServerState.value.dxwrapper,
+            )
+            xServerState.value = xServerState.value.copy(dxwrapper = effectiveDxWrapper)
+        }
+        container.putExtra("dxwrapper", effectiveDxWrapper)
         containerDataChanged = true
     }
 
@@ -4335,6 +4384,42 @@ private fun refreshComponentsFiles(context: Context) {
     TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "pulseaudio-gamenative.tzst", File(context.filesDir, "pulseaudio"))
 }
 
+/**
+ * Extract [graphics_driver/extra_libs.tzst] so `wrapper_icd.aarch64.json` exists.
+ * Android-built PanVK ICDs often omit X11 [VK_KHR_surface]; Wine needs the bionic Vulkan wrapper for X11 WSI.
+ */
+private fun ensureVulkanWrapperIcdFromExtras(context: Context, imageFs: ImageFs, rootDir: File) {
+    val wrapperIcd = File(imageFs.shareDir, "vulkan/icd.d/wrapper_icd.aarch64.json")
+    if (wrapperIcd.isFile) return
+    val ok = TarCompressorUtils.extract(
+        TarCompressorUtils.Type.ZSTD,
+        context.assets,
+        "graphics_driver/extra_libs.tzst",
+        rootDir,
+    )
+    if (!ok || !wrapperIcd.isFile) {
+        Timber.w("Vulkan wrapper ICD missing after extra_libs extract (PanVK + DXVK may lack VK_KHR_surface)")
+    }
+}
+
+/**
+ * Prepends bionic-vulkan-wrapper ICD so instance extensions include [VK_KHR_surface] / Xlib for Wine + DXVK.
+ * Keeps the PanVK ICD in the list for GPU enumeration (colon-separated).
+ */
+private fun prependVulkanWrapperIcdForDxvkWine(envVars: EnvVars, imageFs: ImageFs) {
+    val wrapperIcd = File(imageFs.shareDir, "vulkan/icd.d/wrapper_icd.aarch64.json")
+    if (!wrapperIcd.isFile) {
+        Timber.w("wrapper_icd.aarch64.json not found; cannot prepend X11 Vulkan WSI bridge")
+        return
+    }
+    val current = envVars.get("VK_ICD_FILENAMES")?.trim().orEmpty()
+    if (current.isEmpty()) return
+    val wrapperPath = wrapperIcd.absolutePath
+    if (current.startsWith(wrapperPath)) return
+    envVars.put("VK_ICD_FILENAMES", "$wrapperPath:$current")
+    Timber.i("Prepended Vulkan wrapper ICD for Wine/X11 + DXVK (VK_ICD_FILENAMES=%s)", envVars.get("VK_ICD_FILENAMES"))
+}
+
 private fun extractDXWrapperFiles(
     context: Context,
     firstTimeBoot: Boolean,
@@ -4344,7 +4429,7 @@ private fun extractDXWrapperFiles(
     imageFs: ImageFs,
     contentsManager: ContentsManager,
     onExtractFileListener: OnExtractFileListener?,
-) {
+): String {
     val dlls = arrayOf(
         "d3d10.dll",
         "d3d10_1.dll",
@@ -4365,6 +4450,7 @@ private fun extractDXWrapperFiles(
     when (splitDxWrapper) {
         "wined3d" -> {
             restoreOriginalDllFiles(context, container, containerManager, imageFs, *dlls)
+            return dxwrapper
         }
         "cnc-ddraw" -> {
             restoreOriginalDllFiles(context, container, containerManager, imageFs, *dlls)
@@ -4378,6 +4464,7 @@ private fun extractDXWrapperFiles(
                 TarCompressorUtils.Type.ZSTD, context.assets,
                 "$assetDir/ddraw.tzst", windowsDir, onExtractFileListener,
             )
+            return dxwrapper
         }
         "vkd3d" -> {
             Timber.i("Extracting VKD3D D3D12 DLLs for dxwrapper: $dxwrapper")
@@ -4414,19 +4501,21 @@ private fun extractDXWrapperFiles(
                     onExtractFileListener,
                 )
             }
+            return dxwrapper
         }
         else -> {
-            val profile: ContentProfile? = contentsManager.getProfileByEntryName(dxwrapper)
+            val resolvedDxWrapper = resolveExistingDxWrapper(context, contentsManager, dxwrapper)
+            val profile: ContentProfile? = contentsManager.getProfileByEntryName(resolvedDxWrapper)
             // This block handles dxvk-VERSION strings
-            Timber.i("Extracting DXVK/D8VK DLLs for dxwrapper: $dxwrapper")
+            Timber.i("Extracting DXVK/D8VK DLLs for dxwrapper: $resolvedDxWrapper")
             restoreOriginalDllFiles(context, container, containerManager, imageFs, "d3d12.dll", "d3d12core.dll", "ddraw.dll")
             if (profile != null) {
-                Timber.d("Applying user-defined DXVK content profile: " + dxwrapper)
+                Timber.d("Applying user-defined DXVK content profile: " + resolvedDxWrapper)
                 contentsManager.applyContent(profile);
             } else {
                 TarCompressorUtils.extract(
                     TarCompressorUtils.Type.ZSTD, context.assets,
-                    "dxwrapper/$dxwrapper.tzst", windowsDir, onExtractFileListener,
+                    "dxwrapper/$resolvedDxWrapper.tzst", windowsDir, onExtractFileListener,
                 )
             }
             TarCompressorUtils.extract(
@@ -4436,8 +4525,27 @@ private fun extractDXWrapperFiles(
                 windowsDir,
                 onExtractFileListener,
             )
+            return resolvedDxWrapper
         }
     }
+}
+
+private fun resolveExistingDxWrapper(context: Context, contentsManager: ContentsManager, requested: String): String {
+    if (!requested.startsWith("dxvk-")) return requested
+    val profile = contentsManager.getProfileByEntryName(requested)
+    if (profile != null) return requested
+    val requestedAsset = "dxwrapper/$requested.tzst"
+    val requestedExists = try {
+        context.assets.open(requestedAsset).close()
+        true
+    } catch (_: Exception) {
+        false
+    }
+    if (requestedExists) return requested
+
+    val fallback = "dxvk-${DefaultVersion.DXVK}"
+    Timber.w("Requested DXVK '%s' not found as profile/asset; falling back to '%s'", requested, fallback)
+    return fallback
 }
 private fun cloneOriginalDllFiles(imageFs: ImageFs, vararg dlls: String) {
     val rootDir = imageFs.rootDir
@@ -4757,6 +4865,9 @@ private fun extractGraphicsDriverFiles(
                 TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "graphics_driver/zink-22.2.5.tzst", rootDir)
             }
         } else if (graphicsDriver == "panvk") {
+            if (dxwrapper.contains("dxvk")) {
+                ensureVulkanWrapperIcdFromExtras(context, imageFs, rootDir)
+            }
             val pvMgr = PanVkDriverManager(context)
             val ver = container.graphicsDriverVersion
             if (ver.isNotEmpty() && pvMgr.enumerateInstalledDrivers().contains(ver)) {
@@ -4770,6 +4881,9 @@ private fun extractGraphicsDriverFiles(
                 } else if (ver.isNotEmpty()) {
                     pvMgr.applyManifestDriver(envVars, imageFs, ver)
                 }
+            }
+            if (dxwrapper.contains("dxvk")) {
+                prependVulkanWrapperIcdForDxvkWine(envVars, imageFs)
             }
         }
     } else {
@@ -4809,7 +4923,13 @@ private fun extractGraphicsDriverFiles(
         }
 
         if (isPanVkManifestDriver) {
+            if (dxwrapper.contains("dxvk")) {
+                ensureVulkanWrapperIcdFromExtras(context, imageFs, imageFs.rootDir)
+            }
             panVkDriverManager.applyManifestDriver(envVars, imageFs, selectedDriverVersion)
+            if (dxwrapper.contains("dxvk")) {
+                prependVulkanWrapperIcdForDxvkWine(envVars, imageFs)
+            }
         } else {
             if (currentWrapperVersion.lowercase(Locale.getDefault())
                     .contains("turnip") && isAdrenotoolsTurnip == "0"

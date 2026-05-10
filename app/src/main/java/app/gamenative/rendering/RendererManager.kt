@@ -3,10 +3,13 @@ package app.gamenative.rendering
 import android.content.Context
 import app.gamenative.ui.util.ScreenEffectsConfig
 import com.winlator.container.Container
+import com.winlator.core.DefaultVersion
+import com.winlator.core.DXVKHelper
 import com.winlator.core.envvars.EnvVars
 import com.winlator.xenvironment.ImageFs
 import timber.log.Timber
 import java.io.File
+import java.util.Locale
 
 /**
  * Injects renderer-specific environment variables and optional custom Mesa paths
@@ -143,12 +146,23 @@ object RendererManager {
 
         var mode = resolveEffectiveMode(context, container, gameConfig)
 
-        // PanVK stacks are Vulkan-first; forcing WineD3D on Mali can still trigger
-        // Steam/game Vulkan probing paths and crash early. Prefer DXVK when PanVK is active.
-        val isPanVkRuntime = envVars.get("VK_ICD_FILENAMES").contains("panvk_manifest")
-        if (mode == RendererMode.WINED3D && isPanVkRuntime) {
+        // PanVK stacks are Vulkan-first; the implicit Mali default (WineD3D with no wrapper choice)
+        // still triggers Steam/game Vulkan probes — prefer DXVK when PanVK is active.
+        // If the user explicitly chose WineD3D (wrapper id or launch args), honor it so OpenGL/WineD3D can run.
+        val isPanVkRuntime = isPanVkGraphicsRuntime(container, envVars)
+        val honorWineD3dPath =
+            resolveExplicitMode(container, gameConfig) == RendererMode.WINED3D ||
+                container.dxWrapper.lowercase(Locale.US).let { w ->
+                    w == "wined3d" || w.startsWith("wined3d-") || w == "original-wined3d"
+                }
+        if (mode == RendererMode.WINED3D && isPanVkRuntime && !honorWineD3dPath) {
             Timber.tag(TAG).i("PanVK runtime detected; switching renderer mode from WineD3D to DXVK")
             mode = RendererMode.DXVK
+        }
+        if (mode == RendererMode.WINED3D && isPanVkRuntime && honorWineD3dPath) {
+            Timber.tag(TAG).w(
+                "PanVK + WineD3D path requested — not upgrading to DXVK (OpenGL/Zink may still fail on some devices)",
+            )
         }
 
         if (mode == null) {
@@ -179,6 +193,9 @@ object RendererManager {
 
         clearExclusiveRendererEnv(envVars)
         applyExclusiveProfile(mode, envVars)
+        if (mode == RendererMode.DXVK) {
+            applyDxvkAsyncPipelineEnvFromContainer(container, envVars)
+        }
 
         envVars.put("GAMENATIVE_RENDERER", mode.wireValue)
         envVars.put(
@@ -198,6 +215,20 @@ object RendererManager {
         )
         logMesaDiagnostics(context, envVars, mode)
         return mode
+    }
+
+    /**
+     * True when the graphics stack is a PanVK manifest/content driver: either the container
+     * selection is [Container] panvk, or [VK_ICD_FILENAMES] points at a PanVK ICD path.
+     * (Paths under contents/PanVK do not contain `panvk_manifest`; the old substring check missed them.)
+     */
+    internal fun isPanVkGraphicsRuntime(container: Container, envVars: EnvVars): Boolean {
+        if (container.graphicsDriver.equals("panvk", ignoreCase = true)) return true
+        val icd = envVars.get("VK_ICD_FILENAMES") ?: return false
+        val lower = icd.lowercase(Locale.US)
+        return lower.contains("panvk_manifest") ||
+            lower.contains("panfrost_icd") ||
+            lower.contains("/panvk/")
     }
 
     /**
@@ -247,6 +278,27 @@ object RendererManager {
         )
     }
 
+    /**
+     * Restores DXVK async pipeline env after [clearExclusiveRendererEnv] / [applyExclusiveProfile].
+     * Previously async was always forced on, ignoring container dxwrapperConfig and causing visible
+     * hitching on animated geometry while pipelines compiled asynchronously.
+     */
+    private fun applyDxvkAsyncPipelineEnvFromContainer(container: Container, envVars: EnvVars) {
+        val cfg = DXVKHelper.parseConfig(container.dxWrapperConfig)
+        val async = cfg.get("async", DefaultVersion.ASYNC)
+        if (async.isNotEmpty() && async != "0") {
+            envVars.put("DXVK_ASYNC", "1")
+        } else {
+            envVars.remove("DXVK_ASYNC")
+        }
+        val asyncCache = cfg.get("asyncCache", DefaultVersion.ASYNC_CACHE)
+        if (asyncCache.isNotEmpty() && asyncCache != "0") {
+            envVars.put("DXVK_GPLASYNCCACHE", "1")
+        } else {
+            envVars.remove("DXVK_GPLASYNCCACHE")
+        }
+    }
+
     private fun applyExclusiveProfile(mode: RendererMode, envVars: EnvVars) {
         when (mode) {
             RendererMode.WINED3D -> {
@@ -254,10 +306,16 @@ object RendererManager {
                 // Avoid simultaneous Gallium “zink” loader routing while forcing Wine’s GL driver path.
                 envVars.remove("GALLIUM_DRIVER")
                 envVars.remove("MESA_LOADER_DRIVER_OVERRIDE")
+                envVars.remove("LIBGL_KOPPER_DISABLE")
+                // Container defaults often include ZINK_* tuning; with WineD3D they still steer Mesa toward Zink/Vulkan GL.
+                envVars.remove("ZINK_DESCRIPTORS")
+                envVars.remove("ZINK_DEBUG")
             }
             RendererMode.DXVK -> {
                 envVars.put("DXVK", "1")
-                envVars.put("DXVK_ASYNC", "1")
+                // DXVK_ASYNC / DXVK_GPLASYNCCACHE come from [applyDxvkAsyncPipelineEnvFromContainer] using
+                // container DXVK config — do not force async on here (forced async caused motion judder
+                // while shaders compiled in the background).
                 // DXVK is Vulkan-native. Avoid carrying over Zink/OpenGL routing from driver setup,
                 // which can interfere with device creation on some PanVK/Mali stacks.
                 envVars.remove("GALLIUM_DRIVER")

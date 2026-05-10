@@ -44,7 +44,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class ImageFsInstaller {
-    public static final byte LATEST_VERSION = 28;
+    public static final byte LATEST_VERSION = 29;
 
     private static void resetContainerImgVersions(Context context) {
         ContainerManager manager = new ContainerManager(context);
@@ -189,6 +189,8 @@ public abstract class ImageFsInstaller {
         chmod(new File(imagefs, "usr/lib/libredirect.so"));
         chmod(new File(imagefs, "usr/lib/libredirect-bionic.so"));
 
+        installPackagedRedirectBionic(ctx, imagefs);
+
         final String EXTRAS_TAR = "extras.tzst";          // ➊  add this to assets/
         // ➋  Unpack straight into imagefs, preserving relative paths.
         try (InputStream in  = ctx.getAssets().open(EXTRAS_TAR)) {
@@ -207,6 +209,31 @@ public abstract class ImageFsInstaller {
     }
 
     private static void chmod(File f) { if (f.exists()) FileUtils.chmod(f, 0755);}
+
+    /**
+     * Overlay {@code libredirect-bionic.so} built from {@code redirect_bionic/} NDK sources into imagefs,
+     * replacing any copy shipped inside {@code redirect.tzst}. Uses the APK's nativeLibraryDir so the
+     * installed ABI matches the device.
+     */
+    private static void installPackagedRedirectBionic(Context ctx, File imagefs) {
+        String nativeLibDir = ctx.getApplicationInfo().nativeLibraryDir;
+        File src = new File(nativeLibDir, "libredirect-bionic.so");
+        File dst = new File(imagefs, "usr/lib/libredirect-bionic.so");
+        if (!src.exists()) {
+            Log.w("ImageFsInstaller", "Packaged libredirect-bionic.so not found at " + src.getPath());
+            return;
+        }
+        File parent = dst.getParentFile();
+        if (parent != null && !parent.exists()) {
+            parent.mkdirs();
+        }
+        if (FileUtils.copy(src, dst)) {
+            chmod(dst);
+            Log.i("ImageFsInstaller", "Installed libredirect-bionic.so from APK into imagefs");
+        } else {
+            Log.e("ImageFsInstaller", "Failed to copy libredirect-bionic.so to " + dst.getAbsolutePath());
+        }
+    }
 
     public static Future<Boolean> installIfNeededFuture(final Context context, AssetManager assetManager, Container container, Callback<Integer> onProgress) {
         ImageFs imageFs = ImageFs.find(context);

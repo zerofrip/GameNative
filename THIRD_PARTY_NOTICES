@@ -37,6 +37,16 @@ the binary.
 
 ---
 
+## libredirect-bionic.so (in-tree)
+
+**Component:** `libredirect-bionic.so`  
+**Location:** Built by CMake from `app/src/main/cpp/redirect_bionic/` and packaged in the APK; at imagefs install time copied over `usr/lib/libredirect-bionic.so`.  
+**License:** Same as the GameNative application (GPL-3.0).
+
+This shared library is loaded only into Wine / Proton subprocesses via `LD_PRELOAD`. It rewrites legacy Android data paths (`com.winlator.cmod`, `com.winlator`, `app.gamenative`) to the host package directory supplied by `GAMENATIVE_HOST_DATA_DIR` (set from `Context.getDataDir()`). It does not replace every behaviour of the proprietary `libredirect.so` shipped for glibc stacks.
+
+---
+
 ## libredirect.so (Proprietary)
 
 **Component:** `libredirect.so`
