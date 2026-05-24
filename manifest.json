@@ -600,20 +600,20 @@
       {
         "id": "freedreno-26.2.0-devel",
         "name": "freedreno-26.2.0-devel",
-        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260517-1951/gamenative-freedreno-26.2.0-devel.zip",
+        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260524-1953/gamenative-freedreno-26.2.0-devel.zip",
         "variant": "bionic"
       },
       {
         "id": "panvk-26.2.0-devel",
         "name": "panvk-26.2.0-devel",
-        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260517-1951/gamenative-panvk-26.2.0-devel.zip",
+        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260524-1953/gamenative-panvk-26.2.0-devel.zip",
         "variant": "bionic",
         "driverStack": "panvk"
       },
       {
         "id": "virpipe-26.2.0-devel",
         "name": "virpipe-26.2.0-devel",
-        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260517-1951/gamenative-virpipe-26.2.0-devel.zip",
+        "url": "https://github.com/zerofrip/mesa-mirror/releases/download/gamenative-drivers-20260524-1953/gamenative-virpipe-26.2.0-devel.zip",
         "variant": "bionic"
       }
     ],
