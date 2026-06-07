@@ -184,31 +184,20 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         this.workingDir = workingDir;
     }
 
-    private static void ensurePathInEnvVar(EnvVars envVars, String key, String requiredPath, boolean prepend) {
-        String current = envVars.get(key);
-        if (current == null || current.isEmpty()) {
-            envVars.put(key, requiredPath);
-            return;
-        }
-        if (current.contains(requiredPath)) return;
-        envVars.put(key, prepend ? (requiredPath + ":" + current) : (current + ":" + requiredPath));
-    }
-
     private int execGuestProgram() {
 
         final int MAX_PLAYERS = 1; // old static method
 
         // Get the number of enabled players directly from ControllerManager.
         final int enabledPlayerCount = MAX_PLAYERS;
-        final String gamepadBasePath = "/data/data/" + environment.getContext().getPackageName() + "/files/imagefs/tmp/";
         for (int i = 0; i < enabledPlayerCount; i++) {
             String memPath;
             if (i == 0) {
                 // Player 1 uses the original, non-numbered path that is known to work.
-                memPath = gamepadBasePath + "gamepad.mem";
+                memPath = "/data/data/app.gamenative/files/imagefs/tmp/gamepad.mem";
             } else {
                 // Players 2, 3, 4 use a 1-based index.
-                memPath = gamepadBasePath + "gamepad" + i + ".mem";
+                memPath = "/data/data/app.gamenative/files/imagefs/tmp/gamepad" + i + ".mem";
             }
 
             File memFile = new File(memPath);
@@ -224,9 +213,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         File rootDir = imageFs.getRootDir();
 
         PrefManager.init(context);
-        // Default OFF: matches the settings UI default. When true, Box64 emits per-load and
-        // per-dynarec stdout spam that is piped through ProcessHelper, stalling Wine under load.
-        boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", false);
+        boolean enableBox86_64Logs = PrefManager.getBoolean("enable_box86_64_logs", true);
         boolean shareAndroidClipboard = PrefManager.getBoolean("share_android_clipboard", false);
         boolean enablePebLogs = PrefManager.getBoolean("enable_peb_logs", false);
 
@@ -244,11 +231,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         EnvVars envVars = new EnvVars();
 
-        envVars.put("GAMENATIVE_HOST_DATA_DIR", context.getDataDir().getAbsolutePath());
-
         // Use the ControllerManager's dynamic count for the environment variable
         envVars.put("EVSHIM_MAX_PLAYERS", String.valueOf(enabledPlayerCount));
-        envVars.put("EVSHIM_GAMEPAD_TMP", gamepadBasePath);
         if (true) {
             envVars.put("EVSHIM_SHM_ID", 1);
         }
@@ -349,9 +333,6 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (this.envVars != null) {
             envVars.putAll(this.envVars);
         }
-        // Keep PanVK (or custom) paths, but always include base runtime search paths needed by Wine.
-        ensurePathInEnvVar(envVars, "LD_LIBRARY_PATH", rootDir.getPath() + "/usr/lib", false);
-        ensurePathInEnvVar(envVars, "LD_LIBRARY_PATH", "/system/lib64", false);
 
         if (LsfgVkManager.isSupported(container)) {
             LsfgVkManager.ensureRuntimeInstalled(environment.getContext(), container);
@@ -691,7 +672,6 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         ImageFs imageFs = ImageFs.find(context);
         File rootDir = imageFs.getRootDir();
         EnvVars envVars = new EnvVars();
-        envVars.put("GAMENATIVE_HOST_DATA_DIR", context.getDataDir().getAbsolutePath());
         addBox64EnvVars(envVars, false);
 
         envVars.put("HOME", imageFs.home_path);
