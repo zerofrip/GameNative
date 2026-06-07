@@ -47,25 +47,6 @@ Join our [Discord server](https://discord.gg/2hKv4VfZfE) for support and updates
 
 See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for attributions, copyleft source offers, and notices about third-party and proprietary components bundled with the application.
 
-## Analytics & Privacy
-
-GameNative uses [PostHog](https://posthog.com) for anonymous analytics. No personal information is ever collected — no names, emails, IPs, or device identifiers.
-
-**Always collected** (to improve game compatibility):
-- Game launch, close, and exit events (game name, store, session length, average FPS, container config)
-- Game install, cancel, and uninstall events
-
-This data helps us understand which games work, how well they perform, and automatically apply known-good configurations for future users. It cannot identify you.
-
-**Optional** (can be disabled in Settings > Info > Usage Analytics):
-- Feature usage (on-screen keyboard, controller, HUD, control editor)
-- Login success/failure events
-- Recommendation interactions
-- App lifecycle events (foreground/background)
-- Cloud sync events
-
-See our full [Privacy Policy](PrivacyPolicy/README.md) for more details.
-
 ## Supporters
 Thank you to our [Ko-fi sponsors](https://ko-fi.com/gamenative) and [GitHub sponsors](https://github.com/sponsors/utkarshdalal?preview=true), including [CodeRabbit](https://coderabbit.link/gnative), 
 

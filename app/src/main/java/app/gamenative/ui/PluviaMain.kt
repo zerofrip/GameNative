@@ -65,16 +65,13 @@ import app.gamenative.enums.SyncResult
 import app.gamenative.events.AndroidEvent
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonService
-import com.posthog.PostHog
 import app.gamenative.ui.component.AchievementOverlay
 import app.gamenative.ui.component.ConnectionStatusBanner
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.ui.component.dialog.ContainerConfigDialog
-import app.gamenative.ui.component.dialog.GameFeedbackDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import app.gamenative.ui.component.dialog.MessageDialog
-import app.gamenative.ui.component.dialog.state.GameFeedbackDialogState
 import app.gamenative.ui.component.dialog.state.MessageDialogState
 import app.gamenative.ui.components.BootingSplash
 import app.gamenative.ui.enums.AppOptionMenuType
@@ -94,7 +91,6 @@ import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.PlatformAuthUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ManifestInstaller
-import app.gamenative.utils.GameFeedbackUtils
 import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.UpdateChecker
@@ -254,20 +250,6 @@ private fun consumePendingSteamLoginError(context: Context) {
     SnackbarManager.show(context.getString(R.string.intent_launch_steam_login_failed))
 }
 
-private fun trackGameLaunched(appId: String) {
-    val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
-    val gameName = ContainerUtils.resolveGameName(appId)
-    PostHog.capture(
-        event = "game_launched",
-        properties = mapOf(
-            "game_name" to gameName,
-            "game_store" to gameSource.name,
-            "key_attestation_available" to PrefManager.keyAttestationAvailable,
-            "play_integrity_available" to PrefManager.playIntegrityAvailable,
-        ),
-    )
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PluviaMain(
@@ -285,10 +267,6 @@ fun PluviaMain(
         mutableStateOf(MessageDialogState(false))
     }
     val setMessageDialogState: (MessageDialogState) -> Unit = { msgDialogState = it }
-
-    var gameFeedbackState by rememberSaveable(stateSaver = GameFeedbackDialogState.Saver) {
-        mutableStateOf(GameFeedbackDialogState(false))
-    }
 
     var hasBack by rememberSaveable { mutableStateOf(navController.previousBackStackEntry?.destination?.route != null) }
 
@@ -342,7 +320,6 @@ fun PluviaMain(
     // arrive pre-login (cold-boot via stored creds) and downstream cloud-sync needs a settled answer.
     val launchIntentApp: (resolvedAppId: String, hasTemporaryOverride: Boolean) -> Unit = { resolvedAppId, hasTemporaryOverride ->
         MainActivity.wasLaunchedViaExternalIntent = true
-        trackGameLaunched(resolvedAppId)
         viewModel.setLaunchedAppId(resolvedAppId)
         viewModel.setBootToContainer(false)
         scope.launch(Dispatchers.IO) {
@@ -598,13 +575,6 @@ fun PluviaMain(
                         dismissBtnText = context.getString(R.string.close),
                     )
                 }
-
-                is MainViewModel.MainUiEvent.ShowGameFeedbackDialog -> {
-                    gameFeedbackState = GameFeedbackDialogState(
-                        visible = true,
-                        appId = event.appId,
-                    )
-                }
             }
         }
     }
@@ -736,23 +706,13 @@ fun PluviaMain(
         )
     }
 
-    // Listen for game feedback request
-    val onShowGameFeedback: (AndroidEvent.ShowGameFeedback) -> Unit = { event ->
-        gameFeedbackState = GameFeedbackDialogState(
-            visible = true,
-            appId = event.appId,
-        )
-    }
-
     LaunchedEffect(Unit) {
         PluviaApp.events.on<AndroidEvent.PromptSaveContainerConfig, Unit>(onPromptSaveConfig)
-        PluviaApp.events.on<AndroidEvent.ShowGameFeedback, Unit>(onShowGameFeedback)
     }
 
     DisposableEffect(Unit) {
         onDispose {
             PluviaApp.events.off<AndroidEvent.PromptSaveContainerConfig, Unit>(onPromptSaveConfig)
-            PluviaApp.events.off<AndroidEvent.ShowGameFeedback, Unit>(onShowGameFeedback)
         }
     }
 
@@ -1171,66 +1131,6 @@ fun PluviaMain(
                 }
             }
 
-            GameFeedbackDialog(
-                state = gameFeedbackState,
-                onStateChange = { gameFeedbackState = it },
-                onSubmit = { feedbackState ->
-                    Timber.d(
-                        "GameFeedback: onSubmit called with rating=${feedbackState.rating}, tags=${feedbackState.selectedTags}, text=${
-                            feedbackState.feedbackText.take(
-                                20,
-                            )
-                        }",
-                    )
-                    try {
-                        // Get the container for the app
-                        val appId = feedbackState.appId
-                        Timber.d("GameFeedback: Got appId=$appId")
-
-                        // Submit feedback via worker API
-                        Timber.d("GameFeedback: Starting coroutine for submission")
-                        viewModel.viewModelScope.launch {
-                            Timber.d("GameFeedback: Inside coroutine scope")
-                            try {
-                                Timber.d("GameFeedback: Calling submitGameFeedback with rating=${feedbackState.rating}")
-                                val result = GameFeedbackUtils.submitGameFeedback(
-                                    context = context,
-                                    appId = appId,
-                                    rating = feedbackState.rating,
-                                    tags = feedbackState.selectedTags.toList(),
-                                    notes = feedbackState.feedbackText.takeIf { it.isNotBlank() },
-                                )
-
-                                Timber.d("GameFeedback: Submission returned $result")
-                                if (result) {
-                                    Timber.d("GameFeedback: Showing success snackbar")
-                                    SnackbarManager.show("Thank you for your feedback!")
-                                } else {
-                                    Timber.d("GameFeedback: Showing failure snackbar")
-                                    SnackbarManager.show("Failed to submit feedback")
-                                }
-                            } catch (e: Exception) {
-                                Timber.e(e, "GameFeedback: Error submitting game feedback")
-                                SnackbarManager.show("Error submitting feedback")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Timber.e(e, "GameFeedback: Error preparing game feedback")
-                        SnackbarManager.show("Failed to submit feedback")
-                    } finally {
-                        // Close the dialog regardless of success
-                        Timber.d("GameFeedback: Closing dialog")
-                        gameFeedbackState = GameFeedbackDialogState(visible = false)
-                    }
-                },
-                onDismiss = {
-                    gameFeedbackState = GameFeedbackDialogState(visible = false)
-                },
-                onDiscordSupport = {
-                    uriHandler.openUri("https://discord.gg/2hKv4VfZfE")
-                },
-            )
-
             Box(modifier = Modifier.zIndex(10f)) {
                 BootingSplash(
                     visible = state.showBootingSplash,
@@ -1352,7 +1252,6 @@ fun PluviaMain(
 
                     HomeScreen(
                         onClickPlay = { appId, asContainer ->
-                            trackGameLaunched(appId)
                             viewModel.setLaunchedAppId(appId)
                             viewModel.setBootToContainer(asContainer)
                             viewModel.setTestGraphics(false)

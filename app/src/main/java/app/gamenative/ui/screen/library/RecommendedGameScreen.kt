@@ -44,8 +44,6 @@ import androidx.core.net.toUri
 import app.gamenative.R
 import app.gamenative.data.RecommendedGame
 import app.gamenative.ui.screen.library.components.VideoHero
-import app.gamenative.PrefManager
-import com.posthog.PostHog
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -199,16 +197,6 @@ internal fun RecommendedGameScreen(
             // Buy button
             Button(
                 onClick = {
-                    if (PrefManager.usageAnalyticsEnabled) {
-                        PostHog.capture(
-                            event = "recommendation_link_clicked",
-                            properties = mapOf(
-                                "game_name" to game.name,
-                                "game_id" to game.id,
-                                "affiliate_url" to game.affiliateUrl,
-                            ),
-                        )
-                    }
                     val browserIntent = Intent(Intent.ACTION_VIEW, game.affiliateUrl.toUri())
                     context.startActivity(browserIntent)
                 },

@@ -1319,8 +1319,4 @@ object PrefManager {
         get() = getPref(WARN_BEFORE_EXIT, false)
         set(value) { setPref(WARN_BEFORE_EXIT, value) }
 
-    private val USAGE_ANALYTICS_ENABLED = booleanPreferencesKey("usage_analytics_enabled")
-    var usageAnalyticsEnabled: Boolean
-        get() = getPref(USAGE_ANALYTICS_ENABLED, true)
-        set(value) { setPref(USAGE_ANALYTICS_ENABLED, value) }
 }

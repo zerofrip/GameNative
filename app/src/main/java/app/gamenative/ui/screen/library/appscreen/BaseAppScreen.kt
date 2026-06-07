@@ -626,16 +626,6 @@ abstract class BaseAppScreen {
     }
 
     @Composable
-    private fun getSubmitFeedbackOption(context: Context, libraryItem: LibraryItem): AppMenuOption {
-        return AppMenuOption(
-            optionType = AppOptionMenuType.SubmitFeedback,
-            onClick = {
-                PluviaApp.events.emit(AndroidEvent.ShowGameFeedback(libraryItem.appId))
-            },
-        )
-    }
-
-    @Composable
     private fun getGetSupportOption(context: Context): AppMenuOption {
         return AppMenuOption(
             optionType = AppOptionMenuType.GetSupport,
@@ -862,7 +852,6 @@ abstract class BaseAppScreen {
         }
 
         // Always available options
-        menuOptions.add(getSubmitFeedbackOption(context, libraryItem))
         menuOptions.add(getGetSupportOption(context))
 
         // Add any source-specific options

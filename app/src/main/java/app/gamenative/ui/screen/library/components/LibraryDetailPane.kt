@@ -20,7 +20,6 @@ import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.screen.library.AppScreen
 import app.gamenative.ui.screen.library.RecommendedGameScreen
 import app.gamenative.ui.theme.PluviaTheme
-import com.posthog.PostHog
 import java.util.EnumSet
 
 @Composable
@@ -55,15 +54,6 @@ internal fun LibraryDetailPane(
             }
             LaunchedEffect(libraryItem.recommendedGameId) {
                 game = RecommendationRepository.getCurrentRecommendation(context)
-                if (game != null && PrefManager.usageAnalyticsEnabled) {
-                    PostHog.capture(
-                        event = "recommendation_opened",
-                        properties = mapOf(
-                            "game_name" to (game?.name ?: ""),
-                            "game_id" to (game?.id ?: ""),
-                        ),
-                    )
-                }
             }
             game?.let { rec ->
                 RecommendedGameScreen(

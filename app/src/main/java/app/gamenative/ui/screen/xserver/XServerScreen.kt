@@ -117,7 +117,6 @@ import app.gamenative.utils.SteamTokenLogin
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.downloader.WinComponentDownloader
 import app.gamenative.utils.WineProcessSnapshotHelper
-import com.posthog.PostHog
 import com.winlator.alsaserver.ALSAClient
 import com.winlator.container.Container
 import com.winlator.container.ContainerManager
@@ -969,11 +968,10 @@ fun XServerScreen(
 
     // Shows the soft keyboard, anchored to [anchor]. Handles the Android 12+
     // post-delay quirk and routes input to the external display IME when needed.
-    val showSoftKeyboard: (View, String) -> Unit = { anchor, analyticsEvent ->
+    val showSoftKeyboard: (View) -> Unit = { anchor ->
         anchor.post {
             if (anchor.windowToken != null) {
                 val show = {
-                    if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = analyticsEvent)
                     val isExternalDisplaySession =
                         (anchor.display?.displayId ?: Display.DEFAULT_DISPLAY) != Display.DEFAULT_DISPLAY
 
@@ -996,16 +994,14 @@ fun XServerScreen(
         when (itemId) {
             QuickMenuAction.KEYBOARD -> {
                 keyboardRequestedFromOverlay = true
-                showSoftKeyboard(view, "onscreen_keyboard_enabled")
+                showSoftKeyboard(view)
                 true
             }
 
             QuickMenuAction.INPUT_CONTROLS -> {
                 if (areControlsVisible) {
-                    if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "onscreen_controller_disabled")
                     hideInputControls()
                 } else {
-                    if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "onscreen_controller_enabled")
                     val manager = PluviaApp.inputControlsManager
                     val profiles = manager?.getProfiles(false) ?: listOf()
                     if (profiles.isNotEmpty()) {
@@ -1040,7 +1036,6 @@ fun XServerScreen(
             }
 
             QuickMenuAction.EDIT_CONTROLS -> {
-                if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "edit_controls_in_game")
                 keepPausedForEditor = true
 
                 // Get or create profile for this container
@@ -1165,7 +1160,6 @@ fun XServerScreen(
             }
 
             QuickMenuAction.EDIT_PHYSICAL_CONTROLLER -> {
-                if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "edit_physical_controller_from_menu")
                 keepPausedForEditor = true
                 showPhysicalControllerDialog = true
                 true
@@ -1176,23 +1170,10 @@ fun XServerScreen(
                 isPerformanceHudEnabled = enabled
                 PrefManager.showFps = enabled
                 updatePerformanceHud(enabled)
-                if (PrefManager.usageAnalyticsEnabled) {
-                    PostHog.capture(
-                        event = "performance_hud_toggled",
-                        properties = mapOf("enabled" to enabled),
-                    )
-                }
                 false
             }
 
             QuickMenuAction.EXIT_GAME -> {
-                PostHog.capture(
-                    event = "game_closed",
-                    properties = mapOf(
-                        "game_name" to ContainerUtils.resolveGameName(appId),
-                        "game_store" to ContainerUtils.extractGameSourceFromContainerId(appId).name,
-                    ),
-                )
                 imeInputReceiver?.hideKeyboard()
                 // Resume processes before exiting so they can receive SIGTERM cleanly.
                 forceResumeIfSuspended()
@@ -1209,7 +1190,6 @@ fun XServerScreen(
             ?.isVisible(WindowInsetsCompat.Type.ime()) == true
 
         if (imeVisible) {
-            if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "onscreen_keyboard_disabled")
             imeInputReceiver?.hideKeyboard()
             view.post {
                 if (Build.VERSION.SDK_INT >= 30) {
@@ -2147,7 +2127,7 @@ fun XServerScreen(
 
             // Wire SHOW_KEYBOARD binding callback for overlay control buttons
             icView.setShowKeyboardCallback {
-                showSoftKeyboard(icView, "onscreen_keyboard_enabled_from_binding")
+                showSoftKeyboard(icView)
             }
 
             xServerView.getxServer().winHandler.setInputControlsView(PluviaApp.inputControlsView)
@@ -3937,24 +3917,6 @@ private fun exit(
     if (!isExiting.compareAndSet(false, true)) {
         Timber.i("Exit already in progress, ignoring duplicate request")
         return
-    }
-
-    PostHog.capture(
-        event = "game_exited",
-        properties = mapOf(
-            "game_name" to ContainerUtils.resolveGameName(appId),
-            "game_store" to ContainerUtils.extractGameSourceFromContainerId(appId).name,
-            "session_length" to (frameRating?.sessionLengthSec ?: 0),
-            "avg_fps" to (frameRating?.avgFPS ?: 0.0),
-            "container_config" to container.containerJson,
-        ),
-    )
-
-    // Store session data in container metadata
-    frameRating?.let { rating ->
-        container.putSessionMetadata("avg_fps", rating.avgFPS)
-        container.putSessionMetadata("session_length_sec", rating.sessionLengthSec.toInt())
-        container.saveData()
     }
 
     // only needed in exit() — OS reclaims on process death, so onDestroy fallback skips this

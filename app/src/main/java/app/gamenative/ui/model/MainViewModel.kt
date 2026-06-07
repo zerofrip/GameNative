@@ -67,7 +67,6 @@ class MainViewModel @Inject constructor(
         data class OnLogonEnded(val result: LoginResult) : MainUiEvent()
         data class SteamDisconnected(val isTerminal: Boolean) : MainUiEvent()
         data object ShowDiscordSupportDialog : MainUiEvent()
-        data class ShowGameFeedbackDialog(val appId: String) : MainUiEvent()
         data object ServiceReady : MainUiEvent()
     }
 
@@ -498,37 +497,6 @@ class MainViewModel @Inject constructor(
                 if (hadTemporaryOverride) {
                     PluviaApp.events.emit(AndroidEvent.PromptSaveContainerConfig(appId))
                     // Dialog handler in PluviaMain manages the save/discard logic
-                }
-
-                // After app closes, check if we need to show the feedback dialog
-                // Show feedback if: first time running this game OR config was changed
-                try {
-                    // Show feedback for all stores except custom games.
-                    val feedbackGameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
-                    if (feedbackGameSource != GameSource.CUSTOM_GAME) {
-                        val container = ContainerUtils.getContainer(context, appId)
-
-                        val shown = container.getExtra("discord_support_prompt_shown", "false") == "true"
-                        val configChanged = container.getExtra("config_changed", "false") == "true"
-                        if (!shown) {
-                            container.putExtra("discord_support_prompt_shown", "true")
-                            container.saveData()
-                            _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
-                        }
-
-                        // Only show feedback if container config was changed before this game run
-                        if (configChanged) {
-                            // Clear the flag
-                            container.putExtra("config_changed", "false")
-                            container.saveData()
-                            // Show the feedback dialog
-                            _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
-                        }
-                    } else {
-                        Timber.d("Custom game detected, not showing feedback")
-                    }
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to check/update feedback dialog state for $appId")
                 }
             } finally {
                 onComplete?.invoke()
