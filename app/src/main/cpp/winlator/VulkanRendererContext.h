@@ -59,7 +59,9 @@ struct VkTable {
     PFN_vkCreateShaderModule CreateShaderModule;
     PFN_vkDestroyShaderModule DestroyShaderModule;
     PFN_vkCreateGraphicsPipelines CreateGraphicsPipelines;
+    PFN_vkCreateComputePipelines CreateComputePipelines;
     PFN_vkDestroyPipeline DestroyPipeline;
+    PFN_vkCmdDispatch CmdDispatch;
     PFN_vkCreateCommandPool CreateCommandPool;
     PFN_vkDestroyCommandPool DestroyCommandPool;
     PFN_vkAllocateCommandBuffers AllocateCommandBuffers;
@@ -126,7 +128,12 @@ struct WindowPushConstants {
     float outH;   // on-screen quad height in pixels
 };
 
+class FrameGenVulkan;
+class FrameGenHistory;
+
 class VulkanRendererContext {
+    friend class FrameGenVulkan;
+
 public:
     VulkanRendererContext(ANativeWindow* window, int cWidth, int cHeight, void* adrenotoolsHandle = nullptr);
     ~VulkanRendererContext();
@@ -178,8 +185,18 @@ public:
     void setEffect(int effectId, float sharpness, int effectMask, float brightness, float contrast, float gamma);
     void setPresentMode(VkPresentModeKHR mode);
     std::vector<int> getSupportedPresentModes() const;
+    void setFrameGenEnabled(bool enabled);
+    bool isFrameGenEnabled() const { return frameGenEnabled.load(); }
 
 private:
+    std::atomic<bool> frameGenEnabled{false};
+    FrameGenVulkan* frameGenVulkan = nullptr;
+    FrameGenHistory* frameGenHistory = nullptr;
+    bool frameGenDisabledForSession = false;
+
+    void initFrameGen();
+    void destroyFrameGen();
+    void frameGenInvalidate();
     struct WinTex {
         VkImage              img            = VK_NULL_HANDLE;
         VkDeviceMemory       mem            = VK_NULL_HANDLE;

@@ -9,6 +9,8 @@
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
+#include "FrameGenVulkan.hpp"
+#include "FrameGenHistory.hpp"
 
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH, void* aHandle)
     : window(win), surfaceWidth(cW), surfaceHeight(cH), containerWidth(cW), containerHeight(cH),
@@ -19,6 +21,7 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
     createPipeline(true, pipeline);
     createFramebuffers(); createCmdPool(); createSampler();
     createWinTexPool(); createCursorDS(); createCmdBufs(); createSyncObjects();
+    initFrameGen();
     isRunning = true;
     renderThread = std::thread(&VulkanRendererContext::renderLoop, this);
 }
@@ -39,6 +42,7 @@ VulkanRendererContext::~VulkanRendererContext() {
         if (wt.stg  != VK_NULL_HANDLE) { vk_.DestroyBuffer(device, wt.stg, nullptr); vk_.FreeMemory(device, wt.stgMem, nullptr); }
     }
     deleteQueue.clear();
+    destroyFrameGen();
     cleanupSwapchain(); cleanupCursorTex();
     
     vk_.DestroySampler(device, sampler, nullptr);
@@ -121,7 +125,9 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(CreateShaderModule);
     LOAD_D2(DestroyShaderModule);
     LOAD_D2(CreateGraphicsPipelines);
+    LOAD_D2(CreateComputePipelines);
     LOAD_D2(DestroyPipeline);
+    LOAD_D2(CmdDispatch);
     LOAD_D2(CreateCommandPool);
     LOAD_D2(DestroyCommandPool);
     LOAD_D2(AllocateCommandBuffers);
@@ -244,7 +250,10 @@ void VulkanRendererContext::createLogicalDevice() {
 void VulkanRendererContext::createSwapchain() {
     VkSurfaceCapabilitiesKHR caps;
     vk_.GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice,surface,&caps);
-    swapchainExt=(caps.currentExtent.width!=0xFFFFFFFF)?caps.currentExtent:VkExtent2D{(uint32_t)surfaceWidth,(uint32_t)surfaceHeight};
+    if (caps.currentExtent.width != 0xFFFFFFFF && caps.currentExtent.width != 0 && caps.currentExtent.height != 0)
+        swapchainExt = caps.currentExtent;
+    else
+        swapchainExt = {(uint32_t)std::max(1, surfaceWidth), (uint32_t)std::max(1, surfaceHeight)};
     uint32_t fmtN=0; vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,nullptr);
     std::vector<VkSurfaceFormatKHR> fmts(fmtN); vk_.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice,surface,&fmtN,fmts.data());
     swapchainFmt = VK_FORMAT_R8G8B8A8_UNORM;
@@ -436,6 +445,7 @@ void VulkanRendererContext::createSyncObjects() {
 }
 
 void VulkanRendererContext::cleanupSwapchain() {
+    frameGenInvalidate();
     for (auto fb:swapchainFBs) vk_.DestroyFramebuffer(device,fb,nullptr); swapchainFBs.clear();
     for (auto iv:swapchainViews) vk_.DestroyImageView(device,iv,nullptr); swapchainViews.clear();
     if (!cmdBufs.empty()){vk_.FreeCommandBuffers(device,cmdPool,(uint32_t)cmdBufs.size(),cmdBufs.data());cmdBufs.clear();}
@@ -863,12 +873,13 @@ void VulkanRendererContext::renderFrame() {
     if (surfaceWidth==0||surfaceHeight==0) return;
 
     if (fbResized.load()) {
+        if (surfaceWidth==0||surfaceHeight==0) return;
         for (auto& f:inFlightFences) vk_.WaitForFences(device,1,&f,VK_TRUE,UINT64_MAX);
         cleanupSwapchain();
         bool ok=false;
         try{createSwapchain();createFramebuffers();createCmdBufs();imgInFlight.assign(swapchainImages.size(),VK_NULL_HANDLE);
 ok=true;}catch(...){}
-        if (ok) fbResized.store(false);
+        if (ok && swapchainExt.width>0 && swapchainExt.height>0) fbResized.store(false);
         return;
     }
 
@@ -976,12 +987,94 @@ ok=true;}catch(...){}
         vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
         return;
     }
+
+    bool fgDoublePresent = false;
+    if (frameGenEnabled.load(std::memory_order_relaxed) && !scanoutActive.load(std::memory_order_relaxed)
+        && !frameGenDisabledForSession && frameGenVulkan && frameGenHistory
+        && swapchainExt.width > 0 && swapchainExt.height > 0) {
+        vk_.WaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+        if (frameGenHistory->ensureResources(frameGenVulkan, swapchainExt.width, swapchainExt.height, swapchainFmt)) {
+            bool needsInterp = false;
+            VkImage composed = swapchainImages[imgIdx];
+            if (frameGenHistory->updateAndBlend(frameGenVulkan, composed, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &needsInterp)) {
+                if (needsInterp) {
+                    const FrameGenImage& interp = frameGenHistory->interpOutput();
+                    const FrameGenImage& real = frameGenHistory->previous();
+                    if (frameGenVulkan->copyToSwapchainImage(interp, composed, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)) {
+                        VkSwapchainKHR scs[]={swapchain};
+                        VkPresentInfoKHR piInterp{}; piInterp.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+                        piInterp.swapchainCount=1; piInterp.pSwapchains=scs; piInterp.pImageIndices=&imgIdx;
+                        vk_.QueuePresentKHR(graphicsQueue,&piInterp);
+
+                        uint32_t imgIdxReal = imgIdx;
+                        VkResult ar = vk_.AcquireNextImageKHR(device, swapchain, UINT64_MAX,
+                            VK_NULL_HANDLE, VK_NULL_HANDLE, &imgIdxReal);
+                        if (ar==VK_SUCCESS || ar==VK_SUBOPTIMAL_KHR) {
+                            VkImage realTarget = swapchainImages[imgIdxReal];
+                            if (frameGenVulkan->copyToSwapchainImage(real, realTarget, VK_IMAGE_LAYOUT_UNDEFINED)) {
+                                VkPresentInfoKHR piReal{}; piReal.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+                                piReal.swapchainCount=1; piReal.pSwapchains=scs; piReal.pImageIndices=&imgIdxReal;
+                                VkResult pr = vk_.QueuePresentKHR(graphicsQueue,&piReal);
+                                if (pr==VK_ERROR_OUT_OF_DATE_KHR||pr==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
+                                fgDoublePresent = true;
+                                RLOG("framegen: double present");
+                            }
+                        } else if (ar==VK_ERROR_OUT_OF_DATE_KHR||ar==VK_ERROR_SURFACE_LOST_KHR) {
+                            fbResized.store(true);
+                        }
+                    }
+                }
+            } else {
+                frameGenDisabledForSession = true;
+                RLOG_E("framegen: updateAndBlend failed, disabling for session");
+            }
+        } else {
+            frameGenDisabledForSession = true;
+            RLOG_E("framegen: EnsureResources failed, disabling for session");
+        }
+    }
+
+    if (!fgDoublePresent) {
     VkSwapchainKHR scs[]={swapchain};
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
     res=vk_.QueuePresentKHR(graphicsQueue,&pi);
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
+    }
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
+}
+
+void VulkanRendererContext::initFrameGen() {
+    frameGenVulkan = new FrameGenVulkan(this);
+    frameGenHistory = new FrameGenHistory();
+}
+
+void VulkanRendererContext::destroyFrameGen() {
+    if (frameGenHistory) {
+        if (frameGenVulkan) frameGenHistory->reset(frameGenVulkan);
+        delete frameGenHistory;
+        frameGenHistory = nullptr;
+    }
+    if (frameGenVulkan) {
+        frameGenVulkan->destroyPipeline();
+        delete frameGenVulkan;
+        frameGenVulkan = nullptr;
+    }
+}
+
+void VulkanRendererContext::frameGenInvalidate() {
+    if (frameGenHistory && frameGenVulkan)
+        frameGenHistory->reset(frameGenVulkan);
+    frameGenDisabledForSession = false;
+}
+
+void VulkanRendererContext::setFrameGenEnabled(bool enabled) {
+    frameGenEnabled.store(enabled, std::memory_order_relaxed);
+    if (!enabled)
+        frameGenInvalidate();
+    else
+        frameGenDisabledForSession = false;
+    RLOG("framegen %s", enabled ? "enabled" : "disabled");
 }
 
 void VulkanRendererContext::onSurfaceResized(int w, int h) {
@@ -1045,7 +1138,7 @@ void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy)
 
 void VulkanRendererContext::updatePointerPosition(short x, short y) {
     pointerX.store(x); pointerY.store(y);
-    cursorMoved.store(true); dirtyCV.notify_one();
+    if (cursorVisible.load()) { cursorMoved.store(true); dirtyCV.notify_one(); }
 }
 
 void VulkanRendererContext::setCursorVisible(bool v) {

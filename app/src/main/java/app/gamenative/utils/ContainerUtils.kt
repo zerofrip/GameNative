@@ -7,6 +7,7 @@ import app.gamenative.data.GameSource
 import app.gamenative.enums.Marker
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonService
+import app.gamenative.utils.CompositorFrameGenManager
 import app.gamenative.utils.LsfgVkManager
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGConstants
@@ -109,8 +110,6 @@ object ContainerUtils {
             dxwrapper = PrefManager.dxWrapper,
             dxwrapperConfig = PrefManager.dxWrapperConfig,
             audioDriver = PrefManager.audioDriver,
-            pulseaudioSuspendBehavior = PrefManager.pulseaudioSuspendBehavior,
-            pulseaudioLowLatency = PrefManager.pulseaudioLowLatency,
             wincomponents = PrefManager.winComponents,
             drives = PrefManager.drives,
             execArgs = PrefManager.execArgs,
@@ -175,8 +174,6 @@ object ContainerUtils {
         PrefManager.dxWrapper = containerData.dxwrapper
         PrefManager.dxWrapperConfig = containerData.dxwrapperConfig
         PrefManager.audioDriver = containerData.audioDriver
-        PrefManager.pulseaudioSuspendBehavior = containerData.pulseaudioSuspendBehavior
-        PrefManager.pulseaudioLowLatency = containerData.pulseaudioLowLatency
         PrefManager.winComponents = containerData.wincomponents
         PrefManager.drives = containerData.drives
         PrefManager.execArgs = containerData.execArgs
@@ -349,6 +346,9 @@ object ContainerUtils {
             sharpnessDenoise = container.getExtra("sharpnessDenoise", "100").toIntOrNull() ?: 100,
             // LSFG Vulkan frame generation
             lsfgEnabled = container.getExtra(LsfgVkManager.EXTRA_ARMED, "false").toBoolean(),
+            compositorFrameGenEnabled = container.getExtra(
+                CompositorFrameGenManager.EXTRA_ENABLED, "false",
+            ).toBoolean(),
         )
     }
 
@@ -525,6 +525,10 @@ object ContainerUtils {
         container.putExtra("sharpnessDenoise", containerData.sharpnessDenoise.toString())
         // LSFG Vulkan frame generation
         container.putExtra(LsfgVkManager.EXTRA_ARMED, containerData.lsfgEnabled.toString())
+        container.putExtra(
+            CompositorFrameGenManager.EXTRA_ENABLED,
+            containerData.compositorFrameGenEnabled.toString(),
+        )
         try {
             container.language = containerData.language
         } catch (e: Exception) {
@@ -856,8 +860,6 @@ object ContainerUtils {
                 dxwrapper = initialDxWrapper,
                 dxwrapperConfig = PrefManager.dxWrapperConfig,
                 audioDriver = PrefManager.audioDriver,
-                pulseaudioSuspendBehavior = PrefManager.pulseaudioSuspendBehavior,
-                pulseaudioLowLatency = PrefManager.pulseaudioLowLatency,
                 wincomponents = PrefManager.winComponents,
                 drives = drives,
                 execArgs = PrefManager.execArgs,

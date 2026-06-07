@@ -1506,6 +1506,10 @@
     <string name="review_mixed">Mixed</string>
     <string name="review_mostly_negative">Mostly Negative</string>
     <string name="review_overwhelmingly_negative">Overwhelmingly Negative</string>
+    <!-- Compositor Frame Generation -->
+    <string name="compositor_fg_enable">Enable compositor frame generation</string>
+    <string name="compositor_fg_description">Generate intermediate frames in GameNative\'s Vulkan compositor (Gamescope-style 50/50 blend). Requires the modern Vulkan renderer. Mutually exclusive with LSFG-VK.</string>
+    <string name="compositor_fg_requires_modern_renderer">Requires the modern Vulkan renderer. Disable \"Use Legacy Renderer\" above to enable compositor frame generation.</string>
     <!-- LSFG Frame Generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>
     <string name="lsfg_description">Generate intermediate frames using Lossless Scaling\'s Vulkan layer. Only known to work on Adreno 6xx and above.</string>

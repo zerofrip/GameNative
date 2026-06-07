@@ -130,6 +130,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetPresentMode(long handle, int mode);
     private native void nativeSetEffect(long handle, int effectId, float sharpness,
         int effectMask, float brightness, float contrast, float gamma);
+    private native void nativeSetFrameGenEnabled(long handle, boolean enabled);
 
     private static volatile boolean gpuImageChecked = false;
 
@@ -162,6 +163,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                         nativeDestroy(nativeHandle);
                         nativeHandle = 0;
                     } else {
+                        applyNativeFrameGenEnabled();
                         initComplete = true;
                         xServerView.queueEvent(this::updateScene);
                         return;
@@ -174,6 +176,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     nativeSetEffect(nativeHandle, pendingEffectId, pendingSharpness,
                         pendingEffectMask, pendingBrightness, pendingContrast, pendingGamma);
+                    applyNativeFrameGenEnabled();
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, cursorVisible);
                     if (nativeMode && !effectsRequireCompositor) {
@@ -705,6 +708,32 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
     }
 
+    public void setFrameGenEnabled(boolean enabled) {
+        pendingFrameGenEnabled = enabled;
+        boolean wasRequireCompositor = effectsRequireCompositor;
+        effectsRequireCompositor = computeEffectsRequireCompositor();
+        synchronized (lock) {
+            if (nativeHandle != 0) applyNativeFrameGenEnabled();
+        }
+        if (nativeMode && wasRequireCompositor != effectsRequireCompositor) {
+            if (effectsRequireCompositor) tearDownScanout();
+            else establishScanout();
+        }
+    }
+
+    public boolean isFrameGenEnabled() { return pendingFrameGenEnabled; }
+
+    private void applyNativeFrameGenEnabled() {
+        if (nativeHandle == 0) return;
+        try {
+            nativeSetFrameGenEnabled(nativeHandle, pendingFrameGenEnabled);
+        } catch (UnsatisfiedLinkError e) {
+            android.util.Log.w("VulkanRenderer",
+                "Compositor frame gen unavailable in this libvulkan_renderer build", e);
+            pendingFrameGenEnabled = false;
+        }
+    }
+
     public void setEffect(int effectId, float sharpness) {
         setEffect(effectId, sharpness, SCALE_FIT);
     }
@@ -747,7 +776,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     // compositor (window.frag). Scanout bypasses the shader, so these can only
     // take visible effect when content is routed through the textured-quad path.
     private boolean computeEffectsRequireCompositor() {
-        return pendingEffectId != EFFECT_NONE
+        return pendingFrameGenEnabled
+            || pendingEffectId != EFFECT_NONE
             || pendingEffectMask != 0
             || pendingBrightness != 0.0f
             || pendingContrast != 0.0f
@@ -805,6 +835,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private float   pendingBrightness     = 0.0f;
     private float   pendingContrast       = 0.0f;
     private float   pendingGamma          = 1.0f;
+    private boolean pendingFrameGenEnabled = false;
     // When any screen effect / filter / color adjustment is active we must route
     // fullscreen content through the compositor (window.frag) instead of the
     // zero-copy scanout fast-path, because scanout bypasses the shader entirely.

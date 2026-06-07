@@ -103,6 +103,7 @@ import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.widget.PerformanceHudView
 import app.gamenative.utils.AssetUtils
+import app.gamenative.utils.CompositorFrameGenManager
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.downloader.CoreDriverDownloader
 import app.gamenative.utils.CustomGameScanner
@@ -461,6 +462,8 @@ fun XServerScreen(
 
     // LSFG tab in QuickMenu only visible when enabled in container settings
     val isLsfgAvailable = LsfgQuickMenuHelper.isAvailable(container)
+    val isCompositorFgActive = CompositorFrameGenManager.isEnabled(container) &&
+        !container.isUseLegacyRenderer
     val initialLsfgSettings = remember(container.id) { LsfgQuickMenuHelper.readSettings(container) }
     var lsfgMultiplier by rememberSaveable(container.id) { mutableIntStateOf(initialLsfgSettings.multiplier) }
     var lsfgFlowScale by rememberSaveable(container.id) { mutableStateOf(initialLsfgSettings.flowScale) }
@@ -533,10 +536,13 @@ fun XServerScreen(
         performanceHudView?.setConfig(config)
     }
 
-    LaunchedEffect(xServerView?.renderer) {
+    LaunchedEffect(xServerView?.renderer, isCompositorFgActive) {
         val screenEffectsConfig = loadScreenEffectsConfig(container)
         when (val renderer = xServerView?.renderer) {
-            is VulkanRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
+            is VulkanRenderer -> {
+                applyScreenEffectsConfig(renderer, screenEffectsConfig)
+                renderer.setFrameGenEnabled(isCompositorFgActive)
+            }
             is GLRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
         }
     }
@@ -550,6 +556,7 @@ fun XServerScreen(
 
     fun effectiveFpsLimit(): Int =
         if (isLsfgAvailable && lsfgMultiplier >= 2) 0
+        else if (isCompositorFgActive) 0
         else if (fpsLimiterEnabled) fpsLimiterTarget
         else 0
 

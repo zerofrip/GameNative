@@ -332,6 +332,10 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
             }
         }
 
+        // Compositor frame generation (Gamescope Phase 1 style) — runs in
+        // GameNative's VulkanRenderer after X11 compositing.
+        if (!default) CompositorFrameGenSection(state)
+
         // Frame Generation (LSFG) — hooks the Vulkan swapchain for
         // transparent frame generation. Only effective on Bionic containers
         // with a Vortek/Adreno graphics driver.
@@ -476,6 +480,38 @@ private fun DxWrapperSection(state: ContainerConfigState) {
 }
 
 @Composable
+private fun CompositorFrameGenSection(state: ContainerConfigState) {
+    val config = state.config.value
+    val isBionic = config.containerVariant.equals(Container.BIONIC, ignoreCase = true)
+    if (!isBionic) return
+
+    val modernRenderer = !config.useLegacyRenderer
+    SettingsGroup {
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.compositor_fg_enable)) },
+            subtitle = {
+                Text(
+                    text = stringResource(
+                        if (modernRenderer) R.string.compositor_fg_description
+                        else R.string.compositor_fg_requires_modern_renderer,
+                    ),
+                )
+            },
+            state = config.compositorFrameGenEnabled && modernRenderer,
+            enabled = modernRenderer,
+            onCheckedChange = { enabled ->
+                if (!modernRenderer) return@SettingsSwitch
+                state.config.value = config.copy(
+                    compositorFrameGenEnabled = enabled,
+                    lsfgEnabled = if (enabled) false else config.lsfgEnabled,
+                )
+            },
+        )
+    }
+}
+
+@Composable
 private fun LsfgSection(state: ContainerConfigState) {
     val config = state.config.value
     val lsfgSupported = config.containerVariant.equals(Container.BIONIC, ignoreCase = true)
@@ -494,7 +530,10 @@ private fun LsfgSection(state: ContainerConfigState) {
                     subtitle = { Text(text = stringResource(R.string.lsfg_description)) },
                     state = config.lsfgEnabled,
                     onCheckedChange = {
-                        state.config.value = config.copy(lsfgEnabled = it)
+                        state.config.value = config.copy(
+                            lsfgEnabled = it,
+                            compositorFrameGenEnabled = if (it) false else config.compositorFrameGenEnabled,
+                        )
                     },
                 )
             }
@@ -512,7 +551,10 @@ private fun LsfgSection(state: ContainerConfigState) {
                         ) {
                             dllAvailable = LsfgVkManager.isDllAvailable()
                             if (dllAvailable) {
-                                state.config.value = state.config.value.copy(lsfgEnabled = true)
+                                state.config.value = state.config.value.copy(
+                                    lsfgEnabled = true,
+                                    compositorFrameGenEnabled = false,
+                                )
                             }
                         }
                     },

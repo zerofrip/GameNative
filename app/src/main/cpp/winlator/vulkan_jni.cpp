@@ -264,6 +264,12 @@ Java_com_winlator_renderer_VulkanRenderer_nativeSetEffect(
     );
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_renderer_VulkanRenderer_nativeSetFrameGenEnabled(JNIEnv*, jobject, jlong handle, jboolean enabled) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setFrameGenEnabled(enabled == JNI_TRUE);
+}
+
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeGetSupportedPresentModes(JNIEnv* env, jobject, jlong handle) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);

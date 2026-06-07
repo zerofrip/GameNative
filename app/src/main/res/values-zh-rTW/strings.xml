@@ -1518,6 +1518,10 @@
 
     <string name="tools_wine_processes_empty">未偵測到正在執行的 EXE。</string>
 
+    <!-- Compositor Frame Generation -->
+    <string name="compositor_fg_enable">啟用合成器幀生成</string>
+    <string name="compositor_fg_description">在 GameNative 的 Vulkan 合成器中生成中間幀（Gamescope 式 50/50 混合）。需要現代 Vulkan 渲染器。與 LSFG-VK 互斥。</string>
+    <string name="compositor_fg_requires_modern_renderer">需要現代 Vulkan 渲染器。請先關閉上方的「使用舊版渲染器」。</string>
     <!-- LSFG-VK frame generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>
     <string name="lsfg_description">使用 Lossless Scaling 的 Vulkan 層生成中間幀。已知僅在 Adreno 6xx 及更高版本上可用。</string>

@@ -1491,6 +1491,10 @@
     <string name="review_mixed">混合</string>
     <string name="review_mostly_negative">ほとんどが否定的</string>
     <string name="review_overwhelmingly_negative">圧倒的にネガティブ</string>
+    <!-- Compositor Frame Generation -->
+    <string name="compositor_fg_enable">コンポジターフレーム生成を有効にする</string>
+    <string name="compositor_fg_description">GameNative の Vulkan コンポジターで中間フレームを生成します（Gamescope 方式の 50/50 ブレンド）。モダン Vulkan レンダラーが必要です。LSFG-VK と同時には使用できません。</string>
+    <string name="compositor_fg_requires_modern_renderer">モダン Vulkan レンダラーが必要です。上の「レガシーレンダラーを使用」をオフにしてください。</string>
     <!-- LSFG Frame Generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>
     <string name="lsfg_description">Lossless Scaling\'s Vulkan レイヤーを使用して中間フレームを生成します。 Adreno 6xx 以降でのみ動作することが知られています。</string>
