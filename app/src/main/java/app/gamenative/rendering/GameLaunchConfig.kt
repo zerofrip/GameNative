@@ -13,6 +13,7 @@ import java.io.File
 data class GameLaunchConfig(
     val gameId: String? = null,
     val rendererMode: RendererMode? = null,
+    val fallbackRenderer: RendererMode? = null,
     /** e.g. "900p", "1080p", or explicit "1600x900" */
     val resolution: String? = null,
     val fsr: Boolean? = null,
@@ -43,9 +44,18 @@ data class GameLaunchConfig(
 
         fun parse(json: JSONObject): GameLaunchConfig {
             val rendererRaw = json.optString("renderer", "").trim()
+            val fallbackRaw = when {
+                json.has("fallbackRenderer") -> json.optString("fallbackRenderer", "").trim()
+                else -> json.optString("fallback_renderer", "").trim()
+            }
+            val gameIdRaw = when {
+                json.has("gameId") -> json.optString("gameId", "").trim()
+                else -> json.optString("game_id", "").trim()
+            }
             return GameLaunchConfig(
-                gameId = json.optString("game_id", "").takeIf { it.isNotBlank() },
+                gameId = gameIdRaw.takeIf { it.isNotBlank() },
                 rendererMode = RendererMode.fromStringOrNull(rendererRaw),
+                fallbackRenderer = RendererMode.fromStringOrNull(fallbackRaw),
                 resolution = json.optString("resolution", "").trim().takeIf { it.isNotEmpty() },
                 fsr = if (json.has("fsr")) json.optBoolean("fsr") else null,
                 requireCustomMesa = json.optBoolean("require_custom_mesa", false),

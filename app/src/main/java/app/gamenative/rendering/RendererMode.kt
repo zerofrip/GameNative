@@ -13,7 +13,11 @@ enum class RendererMode(val wireValue: String) {
     companion object {
         fun fromStringOrNull(raw: String?): RendererMode? {
             if (raw.isNullOrBlank()) return null
-            return entries.firstOrNull { it.wireValue.equals(raw.trim(), ignoreCase = true) }
+            val token = raw.trim()
+            return entries.firstOrNull {
+                it.wireValue.equals(token, ignoreCase = true) ||
+                    it.name.equals(token, ignoreCase = true)
+            }
         }
     }
 }

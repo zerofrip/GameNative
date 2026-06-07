@@ -17,24 +17,12 @@ import java.util.Locale
  * via merged [EnvVars] (merged after base paths are set in Java).
  *
  * Env vars controlled here are mutually exclusive: one [RendererMode] owns the pipeline after
- * [clearExclusiveRendererEnv].
+ * [RendererEnvironmentInjector.clearExclusiveRendererEnv].
  */
 object RendererManager {
     private const val TAG = "RendererManager"
     const val EXTRA_RENDERER = "gamenative_renderer"
     private const val LAUNCH_ARG_PATTERN = """--gamenative-renderer=(\w+)"""
-
-    /**
-     * Keys exclusively owned by renderer switching — cleared before applying exactly one profile.
-     * (Does not strip unrelated Mesa/driver tuning from [extractGraphicsDriverFiles].)
-     */
-    private val EXCLUSIVE_RENDERER_KEYS = arrayOf(
-        "PROTON_USE_WINED3D",
-        "DXVK",
-        "DXVK_ASYNC",
-        "MESA_LOADER_DRIVER_OVERRIDE",
-        "LIBGL_KOPPER_DRI2",
-    )
 
     fun resolveExplicitMode(container: Container, gameConfig: GameLaunchConfig?): RendererMode? {
         parseFromExecArgs(container.execArgs)?.let {
@@ -53,16 +41,37 @@ object RendererManager {
     }
 
     /**
-     * Effective mode after vendor defaults: Mali → WineD3D when nothing explicit.
-     * Other GPUs keep “inherit” ([null]) when unset so existing driver extraction stays authoritative.
+     * Effective mode after explicit config, persisted fallback, and GPU-aware defaults.
      */
-    fun resolveEffectiveMode(context: Context, container: Container, gameConfig: GameLaunchConfig?): RendererMode? {
+    fun resolveEffectiveMode(context: Context, container: Container, gameConfig: GameLaunchConfig?): RendererMode {
+        parseFromExecArgs(container.execArgs)?.let { return it }
+
+        if (RendererFallbackCoordinator.shouldUsePersistedMode(container)) {
+            RendererFallbackCoordinator.getPersistedActiveMode(container)?.let {
+                Timber.tag(TAG).i("Renderer from persisted fallback active mode: ${it.wireValue}")
+                return it
+            }
+        }
+
         resolveExplicitMode(container, gameConfig)?.let { return it }
-        return if (GpuRuntimeInfo.isMali(context)) {
-            Timber.tag(TAG).i("No explicit renderer; Mali GPU — defaulting to WineD3D")
-            RendererMode.WINED3D
-        } else {
-            null
+
+        return gpuDefault(context)
+    }
+
+    private fun gpuDefault(context: Context): RendererMode {
+        return when (GpuRuntimeInfo.classifyVendor(context)) {
+            GpuRuntimeInfo.GpuVendorClass.MALI -> {
+                Timber.tag(TAG).i("No explicit renderer; Mali GPU — defaulting to WineD3D")
+                RendererMode.WINED3D
+            }
+            GpuRuntimeInfo.GpuVendorClass.ADRENO -> {
+                Timber.tag(TAG).i("No explicit renderer; Adreno GPU — defaulting to DXVK")
+                RendererMode.DXVK
+            }
+            GpuRuntimeInfo.GpuVendorClass.OTHER -> {
+                Timber.tag(TAG).i("No explicit renderer; unknown/other GPU — defaulting to Zink")
+                RendererMode.ZINK
+            }
         }
     }
 
@@ -82,9 +91,6 @@ object RendererManager {
         return hasGl || hasDri
     }
 
-    /**
-     * Avoid prepending a broken tree to [LD_LIBRARY_PATH] (missing GL / DRI would cause Wine loader failures).
-     */
     fun customMesaBundleLooksValid(context: Context): Boolean {
         val root = GameLaunchConfig.customMesaLibRoot(context)
         if (!root.isDirectory) return false
@@ -103,9 +109,6 @@ object RendererManager {
         }
     }
 
-    /**
-     * Applies resolution / FSR hints from [GameLaunchConfig] to the container (persisted).
-     */
     fun applyPerGameHints(container: Container, cfg: GameLaunchConfig?) {
         if (cfg == null) return
         var changed = false
@@ -141,14 +144,11 @@ object RendererManager {
         envVars: EnvVars,
         container: Container,
         gameConfig: GameLaunchConfig?,
-    ): RendererMode? {
+    ): RendererMode {
         injectCustomMesaPathsIfSafe(context, imageFs, envVars, container)
 
         var mode = resolveEffectiveMode(context, container, gameConfig)
 
-        // PanVK stacks are Vulkan-first; the implicit Mali default (WineD3D with no wrapper choice)
-        // still triggers Steam/game Vulkan probes — prefer DXVK when PanVK is active.
-        // If the user explicitly chose WineD3D (wrapper id or launch args), honor it so OpenGL/WineD3D can run.
         val isPanVkRuntime = isPanVkGraphicsRuntime(container, envVars)
         val honorWineD3dPath =
             resolveExplicitMode(container, gameConfig) == RendererMode.WINED3D ||
@@ -165,13 +165,6 @@ object RendererManager {
             )
         }
 
-        if (mode == null) {
-            Timber.tag(TAG).d("No renderer profile (non-Mali default); driver env unchanged by RendererManager")
-            logMesaDiagnostics(context, envVars, null)
-            return null
-        }
-
-        // Zink requires Vulkan in the host stack.
         if (mode == RendererMode.ZINK && !GpuRuntimeInfo.isVulkanAvailableForZink()) {
             Timber.tag(TAG).e("Zink requested but Vulkan is unavailable — falling back to WineD3D")
             mode = RendererMode.WINED3D
@@ -191,8 +184,8 @@ object RendererManager {
             )
         }
 
-        clearExclusiveRendererEnv(envVars)
-        applyExclusiveProfile(mode, envVars)
+        RendererEnvironmentInjector.clearExclusiveRendererEnv(envVars)
+        RendererEnvironmentInjector.applyProfile(mode, envVars)
         if (mode == RendererMode.DXVK) {
             applyDxvkAsyncPipelineEnvFromContainer(container, envVars)
             applyDxvkCompileLayerHints(envVars)
@@ -208,21 +201,19 @@ object RendererManager {
             if (GpuRuntimeInfo.isVulkanAvailableForZink()) "1" else "0",
         )
 
+        RendererFallbackCoordinator.recordActiveMode(container, mode)
+
         Timber.tag(TAG).i(
             "Active renderer mode: %s (GPU=%s, vulkan=%s)",
             mode.wireValue,
             GpuRuntimeInfo.classifyVendor(context),
             envVars.get("GAMENATIVE_VULKAN_OK"),
         )
+        logExclusiveEnvSnapshot(envVars)
         logMesaDiagnostics(context, envVars, mode)
         return mode
     }
 
-    /**
-     * True when the graphics stack is a PanVK manifest/content driver: either the container
-     * selection is [Container] panvk, or [VK_ICD_FILENAMES] points at a PanVK ICD path.
-     * (Paths under contents/PanVK do not contain `panvk_manifest`; the old substring check missed them.)
-     */
     internal fun isPanVkGraphicsRuntime(container: Container, envVars: EnvVars): Boolean {
         if (container.graphicsDriver.equals("panvk", ignoreCase = true)) return true
         val icd = envVars.get("VK_ICD_FILENAMES") ?: return false
@@ -232,13 +223,16 @@ object RendererManager {
             lower.contains("/panvk/")
     }
 
-    /**
-     * Removes env vars that would overlap across renderer modes; call once before applying one mode.
-     */
+    /** @deprecated Use [RendererEnvironmentInjector.clearExclusiveRendererEnv] */
     fun clearExclusiveRendererEnv(envVars: EnvVars) {
-        for (k in EXCLUSIVE_RENDERER_KEYS) {
-            envVars.remove(k)
-        }
+        RendererEnvironmentInjector.clearExclusiveRendererEnv(envVars)
+    }
+
+    private fun logExclusiveEnvSnapshot(envVars: EnvVars) {
+        val snapshot = RendererEnvironmentInjector.EXCLUSIVE_RENDERER_KEYS
+            .mapNotNull { key -> envVars.get(key)?.let { key to it } }
+            .joinToString(", ") { "${it.first}=${it.second}" }
+        Timber.tag(TAG).d("Exclusive renderer env after injection: %s", snapshot.ifEmpty { "(none)" })
     }
 
     private fun injectCustomMesaPathsIfSafe(context: Context, imageFs: ImageFs, envVars: EnvVars, container: Container) {
@@ -279,11 +273,6 @@ object RendererManager {
         )
     }
 
-    /**
-     * Restores DXVK async pipeline env after [clearExclusiveRendererEnv] / [applyExclusiveProfile].
-     * Previously async was always forced on, ignoring container dxwrapperConfig and causing visible
-     * hitching on animated geometry while pipelines compiled asynchronously.
-     */
     private fun applyDxvkAsyncPipelineEnvFromContainer(container: Container, envVars: EnvVars) {
         val cfg = DXVKHelper.parseConfig(container.dxWrapperConfig)
         val async = cfg.get("async", DefaultVersion.ASYNC)
@@ -300,10 +289,6 @@ object RendererManager {
         }
     }
 
-    /**
-     * Reduces repeated SPIR-V disk cache churn and driver recompiles when env vars were stripped
-     * from the container; does not override explicit user settings.
-     */
     private fun applyDxvkCompileLayerHints(envVars: EnvVars) {
         if (!envVars.has("MESA_SHADER_CACHE_DISABLE")) {
             envVars.put("MESA_SHADER_CACHE_DISABLE", "false")
@@ -313,43 +298,11 @@ object RendererManager {
         }
     }
 
-    private fun applyExclusiveProfile(mode: RendererMode, envVars: EnvVars) {
-        when (mode) {
-            RendererMode.WINED3D -> {
-                envVars.put("PROTON_USE_WINED3D", "1")
-                // Avoid simultaneous Gallium “zink” loader routing while forcing Wine’s GL driver path.
-                envVars.remove("GALLIUM_DRIVER")
-                envVars.remove("MESA_LOADER_DRIVER_OVERRIDE")
-                envVars.remove("LIBGL_KOPPER_DISABLE")
-                // Container defaults often include ZINK_* tuning; with WineD3D they still steer Mesa toward Zink/Vulkan GL.
-                envVars.remove("ZINK_DESCRIPTORS")
-                envVars.remove("ZINK_DEBUG")
-            }
-            RendererMode.DXVK -> {
-                envVars.put("DXVK", "1")
-                // DXVK_ASYNC / DXVK_GPLASYNCCACHE come from [applyDxvkAsyncPipelineEnvFromContainer] using
-                // container DXVK config — do not force async on here (forced async caused motion judder
-                // while shaders compiled in the background).
-                // DXVK is Vulkan-native. Avoid carrying over Zink/OpenGL routing from driver setup,
-                // which can interfere with device creation on some PanVK/Mali stacks.
-                envVars.remove("GALLIUM_DRIVER")
-                envVars.remove("MESA_LOADER_DRIVER_OVERRIDE")
-                envVars.remove("LIBGL_KOPPER_DISABLE")
-            }
-            RendererMode.ZINK -> {
-                envVars.put("MESA_LOADER_DRIVER_OVERRIDE", "zink")
-                envVars.put("GALLIUM_DRIVER", "zink")
-                envVars.put("LIBGL_KOPPER_DRI2", "1")
-                envVars.remove("LIBGL_KOPPER_DISABLE")
-            }
-        }
-    }
-
-    private fun logMesaDiagnostics(context: Context, envVars: EnvVars, mode: RendererMode?) {
+    private fun logMesaDiagnostics(context: Context, envVars: EnvVars, mode: RendererMode) {
         val custom = GameLaunchConfig.customMesaLibRoot(context)
         Timber.tag(TAG).d(
             "Mesa diagnostics: mode=%s gpu=%s customDir=%s bundleOk=%s LD_LIBRARY_PATH(head)=%s LIBGL_DRIVERS_PATH=%s",
-            mode?.wireValue ?: "(inherit)",
+            mode.wireValue,
             GpuRuntimeInfo.classifyVendor(context),
             custom.path,
             customMesaBundleLooksValid(context),

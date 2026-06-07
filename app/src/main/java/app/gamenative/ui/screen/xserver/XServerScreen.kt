@@ -80,6 +80,9 @@ import app.gamenative.PrefManager
 import app.gamenative.SteamBootstrap
 import app.gamenative.data.GameSource
 import app.gamenative.gamefixes.GameFixesRegistry
+import app.gamenative.rendering.GameLaunchConfig
+import app.gamenative.rendering.RendererFallbackCoordinator
+import app.gamenative.rendering.RendererManager
 import app.gamenative.data.LaunchInfo
 import app.gamenative.data.LibraryItem
 import app.gamenative.data.SteamApp
@@ -342,6 +345,14 @@ fun XServerScreen(
 
     val container = remember(appId) {
         ContainerUtils.getContainer(context, appId)
+    }
+
+    val gameLaunchConfig = remember(appId) {
+        GameLaunchConfig.load(context, appId)
+    }
+
+    LaunchedEffect(appId, container) {
+        RendererManager.applyPerGameHints(container, gameLaunchConfig)
     }
 
     val suspendPolicy = remember(container.id) { container.suspendPolicy }
@@ -2003,6 +2014,16 @@ fun XServerScreen(
                                 )
                             }
 
+                            // Renderer profile is applied after driver ICD/asset extraction (paths stay intact)
+                            // but exclusive Gallium/DXVK/WineD3D keys are reset to match the selected mode.
+                            RendererManager.applyToLaunchEnv(
+                                context,
+                                ImageFs.find(context),
+                                envVars,
+                                container,
+                                gameLaunchConfig,
+                            )
+
                             changeWineAudioDriver(xServerState.value.audioDriver, container, ImageFs.find(context))
                             setImagefsContainerVariant(context, container)
                             PluviaApp.xEnvironment = setupXEnvironment(
@@ -2017,7 +2038,8 @@ fun XServerScreen(
                                 xServerView!!.getxServer(),
                                 containerVariantChanged,
                                 onGameLaunchError,
-                                isOffline
+                                isOffline,
+                                gameLaunchConfig,
                             )
                             if (!PluviaApp.isActivityInForeground && !neverSuspend) {
                                 PluviaApp.xEnvironment?.onPause()
@@ -3051,7 +3073,8 @@ private fun setupXEnvironment(
     xServer: XServer,
     containerVariantChanged: Boolean,
     onGameLaunchError: ((String) -> Unit)? = null,
-    offline: Boolean = false
+    offline: Boolean = false,
+    gameLaunchConfig: GameLaunchConfig? = null,
 ): XEnvironment {
     ProcessHelper.hardKillStaleWineProcesses()
 
@@ -3298,6 +3321,20 @@ private fun setupXEnvironment(
     guestProgramLauncherComponent.envVars = envVars
 
     val gameTerminationCallback = Callback<Int> { status ->
+        if (status == 0 || RendererFallbackCoordinator.elapsedSinceLaunchMs() > RendererFallbackCoordinator.EARLY_FAILURE_WINDOW_MS) {
+            RendererFallbackCoordinator.onSuccessfulRun(container)
+        }
+        val retryScheduled = RendererFallbackCoordinator.handleEarlyFailure(
+            context,
+            container,
+            gameLaunchConfig,
+            guestProgramLauncherComponent,
+            status,
+        )
+        if (retryScheduled) {
+            Timber.i("Renderer fallback relaunch scheduled; suppressing guest termination event")
+            return@Callback
+        }
         if (status != 0) {
             Timber.e("Guest program terminated with status: $status")
             onGameLaunchError?.invoke("Game terminated with error status: $status")
@@ -3411,6 +3448,8 @@ private fun setupXEnvironment(
     }
 
     try {
+        RendererFallbackCoordinator.saveLaunchEnvSnapshot(envVars)
+        RendererFallbackCoordinator.markGameLaunchStarted()
         environment.startEnvironmentComponents()
     } catch (e: Exception) {
         Timber.e(e, "Failed to start environment components, cleaning up")
